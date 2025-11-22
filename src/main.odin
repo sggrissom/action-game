@@ -1,6 +1,8 @@
 package main
 
 import "core:os"
+import "core:fmt"
+import "core:time"
 import rl "vendor:raylib"
 
 WINDOW_WIDTH :: 1280
@@ -11,29 +13,75 @@ TILE_SIZE :: 16
 PHYSICS_ITERATIONS :: 8
 GRAVITY :: 5
 TERMINAL_VELOCITY :: 1200
+SPIKE_BREADTH :: 16
+SPIKE_DEPTH :: 12
+SPIKE_DIFF :: TILE_SIZE - SPIKE_DEPTH
 
 Vec2 :: rl.Vector2
 Rect :: rl.Rectangle
+Entity_Id :: distinct int
+
+Entity_Flags :: enum {
+	Grounded,
+	Dead,
+	Kinematic,
+	Debug_Draw,
+}
 
 Entity :: struct {
   using collider: Rect,
   vel:            Vec2,
   move_speed:     f32,
   jump_force:     f32,
-  is_grounded:    bool,
-  is_dead:        bool,
+	on_enter, on_stay, on_exit: proc(self_id, other_id: Entity_Id),
+	entity_ids:                 map[Entity_Id]time.Time,
+	flags:                      bit_set[Entity_Flags],
+	debug_color: rl.Color,
 }
 
 Game_State :: struct {
-  camera:      rl.Camera2D,
-  entities:    [dynamic]Entity,
-  solid_tiles: [dynamic]rl.Rectangle,
+	camera:      rl.Camera2D,
+	entities:    [dynamic]Entity,
+	solid_tiles: [dynamic]Rect,
+	spikes:      map[Entity_Id]Direction,
+}
+
+Direction :: enum {
+	Up,
+	Right,
+	Down,
+	Left,
 }
 
 gs: Game_State
 
+spike_on_enter :: proc(self_id, other_id: Entity_Id) {
+	self := entity_get(self_id)
+	other := entity_get(other_id)
+
+	dir := gs.spikes[self_id]
+	switch dir {
+	case .Up:
+		if other.vel.y > 0 {
+			fmt.println("spikes face Up")
+		}
+	case .Right:
+		if other.vel.x < 0 {
+			fmt.println("spikes face Right")
+		}
+	case .Down:
+		if other.vel.y < 0 {
+			fmt.println("spikes face Down")
+		}
+	case .Left:
+		if other.vel.x > 0 {
+			fmt.println("spikes face Left")
+		}
+	}
+}
+
 main :: proc() {
-  player_id: int
+  player_id: Entity_Id
   {
     data, ok := os.read_entire_file_from_filename("data/test.lvl")
     assert(ok, "Failed to load level data")
@@ -51,6 +99,50 @@ main :: proc() {
         player_id = entity_create(
           {x = x, y = y, width = 16, height = 38, move_speed = 280, jump_force = 650},
         )
+      }
+      if v == '^' {
+        id := entity_create(
+          Entity {
+            collider = Rect{x, y + SPIKE_DIFF, SPIKE_BREADTH, SPIKE_DEPTH},
+            on_enter = spike_on_enter,
+            flags = {.Kinematic, .Debug_Draw},
+            debug_color = rl.YELLOW,
+          },
+        )
+        gs.spikes[id] = .Up
+      }
+      if v == 'v' {
+        id := entity_create(
+          Entity {
+            collider = Rect{x, y, SPIKE_BREADTH, SPIKE_DEPTH},
+            on_enter = spike_on_enter,
+            flags = {.Kinematic, .Debug_Draw},
+            debug_color = rl.YELLOW,
+          },
+        )
+        gs.spikes[id] = .Down
+      }
+      if v == '>' {
+        id := entity_create(
+          Entity {
+            collider = Rect{x, y, SPIKE_DEPTH, SPIKE_BREADTH},
+            on_enter = spike_on_enter,
+            flags = {.Kinematic, .Debug_Draw},
+            debug_color = rl.YELLOW,
+          },
+        )
+        gs.spikes[id] = .Right
+      }
+      if v == '<' {
+        id := entity_create(
+          Entity {
+            collider = Rect{x + SPIKE_DIFF, y, SPIKE_DEPTH, SPIKE_BREADTH},
+            on_enter = spike_on_enter,
+            flags = {.Kinematic, .Debug_Draw},
+            debug_color = rl.YELLOW,
+          },
+        )
+        gs.spikes[id] = .Left
       }
       x += TILE_SIZE
     }
@@ -71,9 +163,9 @@ main :: proc() {
     if rl.IsKeyDown(.D) do input_x += 1
     if rl.IsKeyDown(.A) do input_x -= 1
 
-    if rl.IsKeyPressed(.SPACE) && player.is_grounded {
+    if rl.IsKeyPressed(.SPACE) && .Grounded in player.flags {
       player.vel.y = -player.jump_force
-      player.is_grounded = false
+      player.flags -= {.Grounded}
     }
 
     player.vel.x = input_x * player.move_speed
@@ -86,6 +178,12 @@ main :: proc() {
     for rect in gs.solid_tiles {
       rl.DrawRectangleRec(rect, rl.WHITE)
       rl.DrawRectangleLinesEx(rect, 1, rl.GRAY)
+    }
+
+    for e in gs.entities {
+      if .Debug_Draw in e.flags {
+        rl.DrawRectangleLinesEx(e.collider, 1, e.debug_color)
+      }
     }
 
     rl.DrawRectangleLinesEx(player.collider, 1, rl.GREEN)
