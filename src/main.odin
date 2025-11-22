@@ -1,7 +1,7 @@
 package main
 
-import "core:os"
 import "core:fmt"
+import "core:os"
 import "core:time"
 import rl "vendor:raylib"
 
@@ -29,14 +29,14 @@ Entity_Flags :: enum {
 }
 
 Entity :: struct {
-  using collider: Rect,
-  vel:            Vec2,
-  move_speed:     f32,
-  jump_force:     f32,
+	using collider:             Rect,
+	vel:                        Vec2,
+	move_speed:                 f32,
+	jump_force:                 f32,
 	on_enter, on_stay, on_exit: proc(self_id, other_id: Entity_Id),
 	entity_ids:                 map[Entity_Id]time.Time,
 	flags:                      bit_set[Entity_Flags],
-	debug_color: rl.Color,
+	debug_color:                rl.Color,
 }
 
 Game_State :: struct {
@@ -81,114 +81,116 @@ spike_on_enter :: proc(self_id, other_id: Entity_Id) {
 }
 
 main :: proc() {
-  player_id: Entity_Id
-  {
-    data, ok := os.read_entire_file_from_filename("data/test.lvl")
-    assert(ok, "Failed to load level data")
-    x, y: f32
-    for v in data {
-      if v == '\n' {
-        y += TILE_SIZE
-        x = 0
-        continue
-      }
-      if v == '#' {
-        append(&gs.solid_tiles, rl.Rectangle{x, y, TILE_SIZE, TILE_SIZE})
-      }
-      if v == 'P' {
-        player_id = entity_create(
-          {x = x, y = y, width = 16, height = 38, move_speed = 280, jump_force = 650},
-        )
-      }
-      if v == '^' {
-        id := entity_create(
-          Entity {
-            collider = Rect{x, y + SPIKE_DIFF, SPIKE_BREADTH, SPIKE_DEPTH},
-            on_enter = spike_on_enter,
-            flags = {.Kinematic, .Debug_Draw},
-            debug_color = rl.YELLOW,
-          },
-        )
-        gs.spikes[id] = .Up
-      }
-      if v == 'v' {
-        id := entity_create(
-          Entity {
-            collider = Rect{x, y, SPIKE_BREADTH, SPIKE_DEPTH},
-            on_enter = spike_on_enter,
-            flags = {.Kinematic, .Debug_Draw},
-            debug_color = rl.YELLOW,
-          },
-        )
-        gs.spikes[id] = .Down
-      }
-      if v == '>' {
-        id := entity_create(
-          Entity {
-            collider = Rect{x, y, SPIKE_DEPTH, SPIKE_BREADTH},
-            on_enter = spike_on_enter,
-            flags = {.Kinematic, .Debug_Draw},
-            debug_color = rl.YELLOW,
-          },
-        )
-        gs.spikes[id] = .Right
-      }
-      if v == '<' {
-        id := entity_create(
-          Entity {
-            collider = Rect{x + SPIKE_DIFF, y, SPIKE_DEPTH, SPIKE_BREADTH},
-            on_enter = spike_on_enter,
-            flags = {.Kinematic, .Debug_Draw},
-            debug_color = rl.YELLOW,
-          },
-        )
-        gs.spikes[id] = .Left
-      }
-      x += TILE_SIZE
-    }
-  }
+	player_id: Entity_Id
+	{
+		data, ok := os.read_entire_file_from_filename("data/test.lvl")
+		assert(ok, "Failed to load level data")
+		x, y: f32
+		for v in data {
+			if v == '\n' {
+				y += TILE_SIZE
+				x = 0
+				continue
+			}
+			if v == '#' {
+				append(&gs.solid_tiles, rl.Rectangle{x, y, TILE_SIZE, TILE_SIZE})
+			}
+			if v == 'P' {
+				player_id = entity_create(
+					{x = x, y = y, width = 16, height = 38, move_speed = 280, jump_force = 650},
+				)
+			}
+			if v == '^' {
+				id := entity_create(
+					Entity {
+						collider = Rect{x, y + SPIKE_DIFF, SPIKE_BREADTH, SPIKE_DEPTH},
+						on_enter = spike_on_enter,
+						flags = {.Kinematic, .Debug_Draw},
+						debug_color = rl.YELLOW,
+					},
+				)
+				gs.spikes[id] = .Up
+			}
+			if v == 'v' {
+				id := entity_create(
+					Entity {
+						collider = Rect{x, y, SPIKE_BREADTH, SPIKE_DEPTH},
+						on_enter = spike_on_enter,
+						flags = {.Kinematic, .Debug_Draw},
+						debug_color = rl.YELLOW,
+					},
+				)
+				gs.spikes[id] = .Down
+			}
+			if v == '>' {
+				id := entity_create(
+					Entity {
+						collider = Rect{x, y, SPIKE_DEPTH, SPIKE_BREADTH},
+						on_enter = spike_on_enter,
+						flags = {.Kinematic, .Debug_Draw},
+						debug_color = rl.YELLOW,
+					},
+				)
+				gs.spikes[id] = .Right
+			}
+			if v == '<' {
+				id := entity_create(
+					Entity {
+						collider = Rect{x + SPIKE_DIFF, y, SPIKE_DEPTH, SPIKE_BREADTH},
+						on_enter = spike_on_enter,
+						flags = {.Kinematic, .Debug_Draw},
+						debug_color = rl.YELLOW,
+					},
+				)
+				gs.spikes[id] = .Left
+			}
+			x += TILE_SIZE
+		}
+	}
 
-  rl.InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "simple test")
-  rl.SetTargetFPS(60)
+	rl.InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "simple test")
+	rl.SetTargetFPS(60)
 
-  gs.camera = rl.Camera2D{
-    zoom = ZOOM,
-  }
+	gs.camera = rl.Camera2D {
+		zoom = ZOOM,
+	}
 
-  for !rl.WindowShouldClose() {
-    dt := rl.GetFrameTime()
+	for !rl.WindowShouldClose() {
+		dt := rl.GetFrameTime()
 
-    player := entity_get(player_id)
-    input_x: f32
-    if rl.IsKeyDown(.D) do input_x += 1
-    if rl.IsKeyDown(.A) do input_x -= 1
+		player := entity_get(player_id)
+		input_x: f32
+		if rl.IsKeyDown(.D) do input_x += 1
+		if rl.IsKeyDown(.A) do input_x -= 1
 
-    if rl.IsKeyPressed(.SPACE) && .Grounded in player.flags {
-      player.vel.y = -player.jump_force
-      player.flags -= {.Grounded}
-    }
+		if rl.IsKeyPressed(.SPACE) && .Grounded in player.flags {
+			player.vel.y = -player.jump_force
+			player.flags -= {.Grounded}
+		}
 
-    player.vel.x = input_x * player.move_speed
-    physics_update(gs.entities[:], gs.solid_tiles[:], dt)
+		player.vel.x = input_x * player.move_speed
+		physics_update(gs.entities[:], gs.solid_tiles[:], dt)
 
-    rl.BeginDrawing()
-    rl.BeginMode2D(gs.camera)
-    rl.ClearBackground(BG_COLOR)
 
-    for rect in gs.solid_tiles {
-      rl.DrawRectangleRec(rect, rl.WHITE)
-      rl.DrawRectangleLinesEx(rect, 1, rl.GRAY)
-    }
+		rl.BeginDrawing()
+		rl.BeginMode2D(gs.camera)
+		rl.ClearBackground(BG_COLOR)
 
-    for e in gs.entities {
-      if .Debug_Draw in e.flags {
-        rl.DrawRectangleLinesEx(e.collider, 1, e.debug_color)
-      }
-    }
+		for rect in gs.solid_tiles {
+			rl.DrawRectangleRec(rect, rl.WHITE)
+			rl.DrawRectangleLinesEx(rect, 1, rl.GRAY)
+		}
 
-    rl.DrawRectangleLinesEx(player.collider, 1, rl.GREEN)
+		for e in gs.entities {
+			if .Debug_Draw in e.flags {
+				rl.DrawRectangleLinesEx(e.collider, 1, e.debug_color)
+			}
+		}
 
-    rl.EndMode2D()
-    rl.EndDrawing()
-  }
+		rl.DrawRectangleLinesEx(player.collider, 1, rl.GREEN)
+
+		rl.EndMode2D()
+		rl.EndDrawing()
+	}
 }
+

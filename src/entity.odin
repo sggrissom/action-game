@@ -21,3 +21,4 @@ entity_get :: proc(id: Entity_Id) -> ^Entity {
 	}
 	return &gs.entities[int(id)]
 }
+

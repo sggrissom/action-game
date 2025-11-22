@@ -76,4 +76,3 @@ physics_update :: proc(entities: []Entity, static_colliders: []Rect, dt: f32) {
 	}
 }
 
-
