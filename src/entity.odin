@@ -22,3 +22,11 @@ entity_get :: proc(id: Entity_Id) -> ^Entity {
 	return &gs.entities[int(id)]
 }
 
+entity_update :: proc(entities: []Entity, dt: f32) {
+	for &e in entities {
+		if e.health == 0 && .Immortal not_in e.flags {
+			e.flags += {.Dead}
+		}
+	}
+}
+

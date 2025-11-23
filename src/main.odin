@@ -16,6 +16,12 @@ TERMINAL_VELOCITY :: 1200
 SPIKE_BREADTH :: 16
 SPIKE_DEPTH :: 12
 SPIKE_DIFF :: TILE_SIZE - SPIKE_DEPTH
+UP :: Vec2{0, -1}
+RIGHT :: Vec2{1, 0}
+DOWN :: Vec2{0, 1}
+LEFT :: Vec2{-1, 0}
+
+PLAYER_SAFE_RESET_TIME :: 1
 
 Vec2 :: rl.Vector2
 Rect :: rl.Rectangle
@@ -27,6 +33,7 @@ Entity_Flags :: enum {
 	Kinematic,
 	Debug_Draw,
 	Left,
+	Immortal,
 }
 
 Entity_Behaviors :: enum {
@@ -45,14 +52,21 @@ Entity :: struct {
 	flags:                      bit_set[Entity_Flags],
 	debug_color:                rl.Color,
 	behaviors:                  bit_set[Entity_Behaviors],
+	health:                     int,
+	max_health:                 int,
+	on_hit_damage:              int,
 }
 
 Game_State :: struct {
-	camera:       rl.Camera2D,
-	entities:     [dynamic]Entity,
-	solid_tiles:  [dynamic]Rect,
-	spikes:       map[Entity_Id]Direction,
-	debug_shapes: [dynamic]Debug_Shape,
+	player_id:             Entity_Id,
+	safe_position:         Vec2,
+	safe_reset_timer:      f32,
+	player_uncontrollable: bool,
+	camera:                rl.Camera2D,
+	entities:              [dynamic]Entity,
+	solid_tiles:           [dynamic]Rect,
+	spikes:                map[Entity_Id]Direction,
+	debug_shapes:          [dynamic]Debug_Shape,
 }
 
 Direction :: enum {
@@ -67,6 +81,14 @@ gs: Game_State
 spike_on_enter :: proc(self_id, other_id: Entity_Id) {
 	self := entity_get(self_id)
 	other := entity_get(other_id)
+
+	if other_id == gs.player_id {
+		other.x = gs.safe_position.x
+		other.y = gs.safe_position.y
+		other.vel = 0
+		gs.safe_reset_timer = PLAYER_SAFE_RESET_TIME
+		gs.player_uncontrollable = true
+	}
 
 	dir := gs.spikes[self_id]
 	switch dir {
@@ -89,8 +111,16 @@ spike_on_enter :: proc(self_id, other_id: Entity_Id) {
 	}
 }
 
+player_on_enter :: proc(self_id, other_id: Entity_Id) {
+	player := entity_get(self_id)
+	other := entity_get(other_id)
+
+	if other.on_hit_damage > 0 {
+		player.health -= other.on_hit_damage
+	}
+}
+
 main :: proc() {
-	player_id: Entity_Id
 	{
 		data, ok := os.read_entire_file_from_filename("data/test.lvl")
 		assert(ok, "Failed to load level data")
@@ -105,8 +135,18 @@ main :: proc() {
 				append(&gs.solid_tiles, rl.Rectangle{x, y, TILE_SIZE, TILE_SIZE})
 			}
 			if v == 'P' {
-				player_id = entity_create(
-					{x = x, y = y, width = 16, height = 38, move_speed = 280, jump_force = 650},
+				gs.player_id = entity_create(
+					{
+						x = x,
+						y = y,
+						width = 16,
+						height = 38,
+						move_speed = 280,
+						jump_force = 650,
+						on_enter = player_on_enter,
+						health = 5,
+						max_health = 5,
+					},
 				)
 			}
 			if v == '^' {
@@ -114,7 +154,8 @@ main :: proc() {
 					Entity {
 						collider = Rect{x, y + SPIKE_DIFF, SPIKE_BREADTH, SPIKE_DEPTH},
 						on_enter = spike_on_enter,
-						flags = {.Kinematic, .Debug_Draw},
+						flags = {.Kinematic, .Debug_Draw, .Immortal},
+						on_hit_damage = 1,
 						debug_color = rl.YELLOW,
 					},
 				)
@@ -125,7 +166,8 @@ main :: proc() {
 					Entity {
 						collider = Rect{x, y, SPIKE_BREADTH, SPIKE_DEPTH},
 						on_enter = spike_on_enter,
-						flags = {.Kinematic, .Debug_Draw},
+						flags = {.Kinematic, .Debug_Draw, .Immortal},
+						on_hit_damage = 1,
 						debug_color = rl.YELLOW,
 					},
 				)
@@ -136,7 +178,8 @@ main :: proc() {
 					Entity {
 						collider = Rect{x, y, SPIKE_DEPTH, SPIKE_BREADTH},
 						on_enter = spike_on_enter,
-						flags = {.Kinematic, .Debug_Draw},
+						flags = {.Kinematic, .Debug_Draw, .Immortal},
+						on_hit_damage = 1,
 						debug_color = rl.YELLOW,
 					},
 				)
@@ -147,7 +190,8 @@ main :: proc() {
 					Entity {
 						collider = Rect{x + SPIKE_DIFF, y, SPIKE_DEPTH, SPIKE_BREADTH},
 						on_enter = spike_on_enter,
-						flags = {.Kinematic, .Debug_Draw},
+						flags = {.Kinematic, .Debug_Draw, .Immortal},
+						on_hit_damage = 1,
 						debug_color = rl.YELLOW,
 					},
 				)
@@ -158,7 +202,7 @@ main :: proc() {
 					Entity {
 						collider = Rect{x, y, TILE_SIZE, TILE_SIZE},
 						move_speed = 50,
-						flags = {.Debug_Draw},
+						flags = {.Debug_Draw, .Immortal},
 						behaviors = {.Walk, .Flip_At_Wall, .Flip_At_Edge},
 						debug_color = rl.RED,
 					},
@@ -178,20 +222,58 @@ main :: proc() {
 	for !rl.WindowShouldClose() {
 		dt := rl.GetFrameTime()
 
-		player := entity_get(player_id)
-		input_x: f32
-		if rl.IsKeyDown(.D) do input_x += 1
-		if rl.IsKeyDown(.A) do input_x -= 1
+		gs.safe_reset_timer -= dt
 
-		if rl.IsKeyPressed(.SPACE) && .Grounded in player.flags {
-			player.vel.y = -player.jump_force
-			player.flags -= {.Grounded}
+		if gs.safe_reset_timer <= 0 {
+			gs.player_uncontrollable = false
 		}
 
-		player.vel.x = input_x * player.move_speed
+		player := entity_get(gs.player_id)
+		if !gs.player_uncontrollable {
+			input_x: f32
+			if rl.IsKeyDown(.D) do input_x += 1
+			if rl.IsKeyDown(.A) do input_x -= 1
+
+			if rl.IsKeyPressed(.SPACE) && .Grounded in player.flags {
+				player.vel.y = -player.jump_force
+				player.flags -= {.Grounded}
+			}
+
+			player.vel.x = input_x * player.move_speed
+		}
+
+		entity_update(gs.entities[:], dt)
 		physics_update(gs.entities[:], gs.solid_tiles[:], dt)
 		behavior_update(gs.entities[:], gs.solid_tiles[:], dt)
 
+		if .Grounded in player.flags {
+			pos := Vec2{player.x, player.y}
+			size := Vec2{player.width, player.height}
+
+			targets := make([dynamic]Rect, context.temp_allocator)
+			for e, i in gs.entities {
+				if Entity_Id(i) == gs.player_id do continue
+				if .Dead not_in e.flags {
+					append(&targets, e.collider)
+				}
+			}
+
+			safety_check: {
+				_, hit_ground_left := raycast(pos + {0, size.y}, DOWN * 2, gs.solid_tiles[:])
+				if !hit_ground_left do break safety_check
+
+				_, hit_ground_right := raycast(pos + size, DOWN * 2, gs.solid_tiles[:])
+				if !hit_ground_right do break safety_check
+
+				_, hit_entity_left := raycast(pos, LEFT * TILE_SIZE, targets[:])
+				if hit_entity_left do break safety_check
+
+				_, hit_entity_right := raycast(pos + {size.x, 0}, RIGHT * TILE_SIZE, targets[:])
+				if hit_entity_right do break safety_check
+
+				gs.safe_position = pos
+			}
+		}
 
 		rl.BeginDrawing()
 		rl.BeginMode2D(gs.camera)
@@ -203,10 +285,12 @@ main :: proc() {
 		}
 
 		for e in gs.entities {
-			if .Debug_Draw in e.flags {
+			if .Debug_Draw in e.flags && .Dead not_in e.flags {
 				rl.DrawRectangleLinesEx(e.collider, 1, e.debug_color)
 			}
 		}
+
+		debug_draw_rect(gs.safe_position, {player.width, player.height}, 1, rl.BLUE)
 
 		rl.DrawRectangleLinesEx(player.collider, 1, rl.GREEN)
 
