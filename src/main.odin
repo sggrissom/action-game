@@ -40,10 +40,11 @@ Entity :: struct {
 }
 
 Game_State :: struct {
-	camera:      rl.Camera2D,
-	entities:    [dynamic]Entity,
-	solid_tiles: [dynamic]Rect,
-	spikes:      map[Entity_Id]Direction,
+	camera:       rl.Camera2D,
+	entities:     [dynamic]Entity,
+	solid_tiles:  [dynamic]Rect,
+	spikes:       map[Entity_Id]Direction,
+	debug_shapes: [dynamic]Debug_Shape,
 }
 
 Direction :: enum {
@@ -189,8 +190,29 @@ main :: proc() {
 
 		rl.DrawRectangleLinesEx(player.collider, 1, rl.GREEN)
 
+		debug_draw_rect(20, 100, 4, rl.GREEN)
+		debug_draw_line(20, 100, 4, rl.YELLOW)
+		debug_draw_circle(20, 100, rl.RED)
+		for s in gs.debug_shapes {
+			switch v in s {
+			case Debug_Line:
+				rl.DrawLineEx(v.start, v.end, v.thickness, v.color)
+			case Debug_Rect:
+				rl.DrawRectangleLinesEx(
+					{v.pos.x, v.pos.y, v.size.x, v.size.y},
+					v.thickness,
+					v.color,
+				)
+			case Debug_Circle:
+				rl.DrawCircleLinesV(v.pos, v.radius, v.color)
+			}
+		}
+
 		rl.EndMode2D()
+		rl.DrawFPS(10, 10)
 		rl.EndDrawing()
+
+		clear(&gs.debug_shapes)
 	}
 }
 
