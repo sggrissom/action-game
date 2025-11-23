@@ -76,3 +76,36 @@ physics_update :: proc(entities: []Entity, static_colliders: []Rect, dt: f32) {
 	}
 }
 
+COLLISION_EPSILON :: 0.01
+
+raycast :: proc(
+	start, magnitude: Vec2,
+	targets: []Rect,
+	allocator := context.temp_allocator,
+) -> (
+	hits: []Vec2,
+	ok: bool,
+) {
+	hit_store := make([dynamic]Vec2, allocator)
+
+	for t in targets {
+		p, q, r, s: Vec2 =
+			{t.x, t.y},
+			{t.x, t.y + t.height},
+			{t.x + t.width, t.y + t.height},
+			{t.x + t.width, t.y}
+		lines := [4][2]Vec2{{p, q}, {q, r}, {r, s}, {s, p}}
+		for line in lines {
+			point: Vec2
+			if rl.CheckCollisionLines(start, start + magnitude, line[0], line[1], &point) {
+				append(&hit_store, point)
+			}
+		}
+
+		color := len(hit_store) > 0 ? rl.GREEN : rl.YELLOW
+		debug_draw_line(start, start + magnitude, 1, color)
+	}
+
+	return hit_store[:], len(hit_store) > 0
+}
+

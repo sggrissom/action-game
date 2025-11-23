@@ -26,6 +26,13 @@ Entity_Flags :: enum {
 	Dead,
 	Kinematic,
 	Debug_Draw,
+	Left,
+}
+
+Entity_Behaviors :: enum {
+	Walk,
+	Flip_At_Wall,
+	Flip_At_Edge,
 }
 
 Entity :: struct {
@@ -37,6 +44,7 @@ Entity :: struct {
 	entity_ids:                 map[Entity_Id]time.Time,
 	flags:                      bit_set[Entity_Flags],
 	debug_color:                rl.Color,
+	behaviors:                  bit_set[Entity_Behaviors],
 }
 
 Game_State :: struct {
@@ -145,6 +153,17 @@ main :: proc() {
 				)
 				gs.spikes[id] = .Left
 			}
+			if v == 'e' {
+				entity_create(
+					Entity {
+						collider = Rect{x, y, TILE_SIZE, TILE_SIZE},
+						move_speed = 50,
+						flags = {.Debug_Draw},
+						behaviors = {.Walk, .Flip_At_Wall, .Flip_At_Edge},
+						debug_color = rl.RED,
+					},
+				)
+			}
 			x += TILE_SIZE
 		}
 	}
@@ -171,6 +190,7 @@ main :: proc() {
 
 		player.vel.x = input_x * player.move_speed
 		physics_update(gs.entities[:], gs.solid_tiles[:], dt)
+		behavior_update(gs.entities[:], gs.solid_tiles[:], dt)
 
 
 		rl.BeginDrawing()
@@ -190,9 +210,6 @@ main :: proc() {
 
 		rl.DrawRectangleLinesEx(player.collider, 1, rl.GREEN)
 
-		debug_draw_rect(20, 100, 4, rl.GREEN)
-		debug_draw_line(20, 100, 4, rl.YELLOW)
-		debug_draw_circle(20, 100, rl.RED)
 		for s in gs.debug_shapes {
 			switch v in s {
 			case Debug_Line:
