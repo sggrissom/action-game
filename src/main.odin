@@ -140,42 +140,42 @@ main :: proc() {
 	rl.SetTargetFPS(60)
 
 	{
-		player_texture := rl.LoadTexture("assets/textures/player_128x128.png")
+		player_texture := rl.LoadTexture("assets/textures/player_120x80.png")
 
 		player_anim_idle := Animation {
-			size   = {128, 128},
-			offset = {56, 90},
+			size   = {120, 80},
+			offset = {52, 42},
 			start  = 0,
-			end    = 5,
+			end    = 9,
 			row    = 0,
 			time   = 0.15,
 		}
 
-		player_anim_run := Animation {
-			size   = {128, 128},
-			offset = {56, 90},
+		player_anim_jump := Animation {
+			size   = {120, 80},
+			offset = {52, 42},
 			start  = 0,
-			end    = 7,
+			end    = 2,
 			row    = 1,
-			time   = 0.1,
+			time   = 0.15,
 		}
 
-		player_anim_jump := Animation {
-			size   = {128, 128},
-			offset = {56, 90},
-			start  = 0,
+		player_anim_jump_fall_inbetween := Animation {
+			size   = {120, 80},
+			offset = {52, 42},
+			start  = 3,
 			end    = 4,
-			row    = 2,
-			time   = 0.1,
+			row    = 1,
+			time   = 0.15,
 		}
 
 		player_anim_fall := Animation {
-			size   = {128, 128},
-			offset = {56, 90},
+			size   = {120, 80},
+			offset = {52, 42},
 			start  = 5,
-			end    = 9,
-			row    = 2,
-			time   = 0.1,
+			end    = 7,
+			row    = 1,
+			time   = 0.15,
 		}
 
 		data, ok := os.read_entire_file_from_filename("data/test.lvl")
@@ -205,8 +205,8 @@ main :: proc() {
 						texture = &player_texture,
 						animations = {
 							"idle" = player_anim_idle,
-							"run" = player_anim_run,
 							"jump" = player_anim_jump,
+							"jump_fall_inbetween" = player_anim_jump_fall_inbetween,
 							"fall" = player_anim_fall,
 						},
 						current_anim_name = "idle",
@@ -314,6 +314,12 @@ main :: proc() {
 			}
 
 			player.vel.x = input_x * player.move_speed
+
+			if player.vel.x < 0 {
+				player.flags += {.Left}
+			} else if player.vel.x > 0 {
+				player.flags -= {.Left}
+			}
 		}
 
 		entity_update(gs.entities[:], dt)
