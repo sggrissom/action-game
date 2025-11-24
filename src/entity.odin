@@ -27,6 +27,21 @@ entity_update :: proc(entities: []Entity, dt: f32) {
 		if e.health == 0 && .Immortal not_in e.flags {
 			e.flags += {.Dead}
 		}
+
+		if len(e.animations) > 0 {
+			anim := e.animations[e.current_anim_name]
+
+			e.animation_timer -= dt
+			if e.animation_timer <= 0 {
+				e.current_anim_frame += 1
+
+				if e.current_anim_frame > anim.end {
+					e.current_anim_frame = anim.start
+				}
+
+				e.animation_timer = anim.time
+			}
+		}
 	}
 }
 

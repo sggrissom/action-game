@@ -1,3 +1,4 @@
+#+feature dynamic-literals
 package main
 
 import "core:fmt"
@@ -42,6 +43,13 @@ Entity_Behaviors :: enum {
 	Flip_At_Edge,
 }
 
+Direction :: enum {
+	Up,
+	Right,
+	Down,
+	Left,
+}
+
 Entity :: struct {
 	using collider:             Rect,
 	vel:                        Vec2,
@@ -55,6 +63,11 @@ Entity :: struct {
 	health:                     int,
 	max_health:                 int,
 	on_hit_damage:              int,
+	texture:                    ^rl.Texture,
+	animations:                 map[string]Animation,
+	current_anim_name:          string,
+	current_anim_frame:         int,
+	animation_timer:            f32,
 }
 
 Game_State :: struct {
@@ -69,11 +82,13 @@ Game_State :: struct {
 	debug_shapes:          [dynamic]Debug_Shape,
 }
 
-Direction :: enum {
-	Up,
-	Right,
-	Down,
-	Left,
+Animation :: struct {
+	size:   Vec2,
+	offset: Vec2,
+	start:  int,
+	end:    int,
+	row:    int,
+	time:   f32,
 }
 
 gs: Game_State
@@ -121,7 +136,48 @@ player_on_enter :: proc(self_id, other_id: Entity_Id) {
 }
 
 main :: proc() {
+	rl.InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "simple test")
+	rl.SetTargetFPS(60)
+
 	{
+		player_texture := rl.LoadTexture("assets/textures/player_128x128.png")
+
+		player_anim_idle := Animation {
+			size   = {128, 128},
+			offset = {56, 90},
+			start  = 0,
+			end    = 5,
+			row    = 0,
+			time   = 0.15,
+		}
+
+		player_anim_run := Animation {
+			size   = {128, 128},
+			offset = {56, 90},
+			start  = 0,
+			end    = 7,
+			row    = 1,
+			time   = 0.1,
+		}
+
+		player_anim_jump := Animation {
+			size   = {128, 128},
+			offset = {56, 90},
+			start  = 0,
+			end    = 4,
+			row    = 2,
+			time   = 0.1,
+		}
+
+		player_anim_fall := Animation {
+			size   = {128, 128},
+			offset = {56, 90},
+			start  = 5,
+			end    = 9,
+			row    = 2,
+			time   = 0.1,
+		}
+
 		data, ok := os.read_entire_file_from_filename("data/test.lvl")
 		assert(ok, "Failed to load level data")
 		x, y: f32
@@ -146,6 +202,15 @@ main :: proc() {
 						on_enter = player_on_enter,
 						health = 5,
 						max_health = 5,
+						texture = &player_texture,
+						animations = {
+							"idle" = player_anim_idle,
+							"run" = player_anim_run,
+							"jump" = player_anim_jump,
+							"fall" = player_anim_fall,
+						},
+						current_anim_name = "idle",
+						animation_timer = 0.15,
 					},
 				)
 			}
@@ -212,9 +277,6 @@ main :: proc() {
 		}
 	}
 
-	rl.InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "simple test")
-	rl.SetTargetFPS(60)
-
 	gs.camera = rl.Camera2D {
 		zoom = ZOOM,
 	}
@@ -237,6 +299,18 @@ main :: proc() {
 			if rl.IsKeyPressed(.SPACE) && .Grounded in player.flags {
 				player.vel.y = -player.jump_force
 				player.flags -= {.Grounded}
+				player.current_anim_name = "jump"
+				player.current_anim_frame = 0
+			}
+
+			if player.vel.y >= 0 {
+				if .Grounded not_in player.flags {
+					player.current_anim_name = "fall"
+					player.current_anim_frame = 0
+				} else {
+					player.current_anim_name = "idle"
+					player.current_anim_frame = 0
+				}
 			}
 
 			player.vel.x = input_x * player.move_speed
@@ -284,7 +358,22 @@ main :: proc() {
 			rl.DrawRectangleLinesEx(rect, 1, rl.GRAY)
 		}
 
-		for e in gs.entities {
+		for &e in gs.entities {
+			if e.texture != nil && len(e.animations) > 0 {
+				anim := e.animations[e.current_anim_name]
+
+				source := Rect {
+					f32(e.current_anim_frame) * anim.size.x,
+					f32(anim.row) * anim.size.y,
+					anim.size.x,
+					anim.size.y,
+				}
+				if .Left in e.flags {
+					source.width = -source.width
+				}
+				rl.DrawTextureRec(e.texture^, source, {e.x, e.y} - anim.offset, rl.WHITE)
+			}
+
 			if .Debug_Draw in e.flags && .Dead not_in e.flags {
 				rl.DrawRectangleLinesEx(e.collider, 1, e.debug_color)
 			}
