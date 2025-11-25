@@ -45,3 +45,10 @@ entity_update :: proc(entities: []Entity, dt: f32) {
 	}
 }
 
+switch_animation :: proc(entity: ^Entity, name: string) {
+	entity.current_anim_name = name
+	anim := entity.animations[name]
+	entity.animation_timer = anim.time
+	entity.current_anim_frame = anim.start
+}
+
