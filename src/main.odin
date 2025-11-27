@@ -83,12 +83,26 @@ Game_State :: struct {
 }
 
 Animation :: struct {
-	size:   Vec2,
-	offset: Vec2,
-	start:  int,
-	end:    int,
-	row:    int,
-	time:   f32,
+	size:         Vec2,
+	offset:       Vec2,
+	start:        int,
+	end:          int,
+	row:          int,
+	time:         f32,
+	flags:        bit_set[Animation_Flags],
+	on_finish:    proc(gs: ^Game_State, entity: ^Entity),
+	timed_events: [dynamic]Animation_Event,
+}
+
+Animation_Flags :: enum {
+	Loop,
+	Ping_Pong,
+}
+
+Animation_Event :: struct {
+	timer:    f32,
+	duration: f32,
+	callback: proc(gs: ^Game_State, entity: ^Entity),
 }
 
 gs: Game_State
@@ -150,6 +164,7 @@ main :: proc() {
 			end    = 9,
 			row    = 0,
 			time   = 0.15,
+			flags  = {.Loop},
 		}
 
 		player_anim_jump := Animation {
@@ -177,6 +192,7 @@ main :: proc() {
 			end    = 7,
 			row    = 1,
 			time   = 0.15,
+			flags  = {.Loop},
 		}
 
 		player_anim_run := Animation {
@@ -186,6 +202,18 @@ main :: proc() {
 			end    = 9,
 			row    = 2,
 			time   = 0.15,
+			flags  = {.Loop},
+		}
+
+		player_anim_attack := Animation {
+			size         = {120, 80},
+			offset       = {52, 42},
+			start        = 0,
+			end          = 3,
+			row          = 3,
+			time         = 0.15,
+			on_finish    = player_on_finish_attack,
+			timed_events = {{timer = 0.15, duration = 0.15, callback = player_attack_callback}},
 		}
 
 		data, ok := os.read_entire_file_from_filename("data/test.lvl")
@@ -219,6 +247,7 @@ main :: proc() {
 							"jump_fall_inbetween" = player_anim_jump_fall_inbetween,
 							"fall" = player_anim_fall,
 							"run" = player_anim_run,
+							"attack" = player_anim_attack,
 						},
 						current_anim_name = "idle",
 						animation_timer = 0.15,
@@ -298,7 +327,7 @@ main :: proc() {
 		player := entity_get(gs.player_id)
 
 		player_update(&gs, dt)
-		entity_update(gs.entities[:], dt)
+		entity_update(&gs, dt)
 		physics_update(gs.entities[:], gs.solid_tiles[:], dt)
 		behavior_update(gs.entities[:], gs.solid_tiles[:], dt)
 
@@ -362,6 +391,12 @@ main :: proc() {
 		}
 
 		debug_draw_rect(gs.safe_position, {player.width, player.height}, 1, rl.BLUE)
+		debug_draw_circle(
+			{player.collider.x, player.collider.y} +
+			{.Left in player.flags ? -30 + player.collider.width : 30, 20},
+			25,
+			rl.GREEN,
+		)
 
 		rl.DrawRectangleLinesEx(player.collider, 1, rl.GREEN)
 
