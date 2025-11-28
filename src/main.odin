@@ -50,6 +50,11 @@ Direction :: enum {
 	Left,
 }
 
+Scene_Type :: enum {
+	Main_Menu,
+	Game,
+}
+
 Entity :: struct {
 	using collider:             Rect,
 	vel:                        Vec2,
@@ -80,6 +85,10 @@ Game_State :: struct {
 	solid_tiles:           [dynamic]Rect,
 	spikes:                map[Entity_Id]Direction,
 	debug_shapes:          [dynamic]Debug_Shape,
+	player_texture:        rl.Texture,
+	scene:                 Scene_Type,
+	font_48:               rl.Font,
+	font_64:               rl.Font,
 }
 
 Animation :: struct {
@@ -104,8 +113,6 @@ Animation_Event :: struct {
 	duration: f32,
 	callback: proc(gs: ^Game_State, entity: ^Entity),
 }
-
-gs: Game_State
 
 spike_on_enter :: proc(self_id, other_id: Entity_Id) {
 	self := entity_get(self_id)
@@ -150,184 +157,202 @@ player_on_enter :: proc(self_id, other_id: Entity_Id) {
 	}
 }
 
+gs: Game_State
+
 main :: proc() {
 	rl.InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "simple test")
 	rl.SetTargetFPS(60)
 
-	{
-		player_texture := rl.LoadTexture("assets/textures/player_120x80.png")
-
-		player_anim_idle := Animation {
-			size   = {120, 80},
-			offset = {52, 42},
-			start  = 0,
-			end    = 9,
-			row    = 0,
-			time   = 0.15,
-			flags  = {.Loop},
-		}
-
-		player_anim_jump := Animation {
-			size   = {120, 80},
-			offset = {52, 42},
-			start  = 0,
-			end    = 2,
-			row    = 1,
-			time   = 0.15,
-		}
-
-		player_anim_jump_fall_inbetween := Animation {
-			size   = {120, 80},
-			offset = {52, 42},
-			start  = 3,
-			end    = 4,
-			row    = 1,
-			time   = 0.15,
-		}
-
-		player_anim_fall := Animation {
-			size   = {120, 80},
-			offset = {52, 42},
-			start  = 5,
-			end    = 7,
-			row    = 1,
-			time   = 0.15,
-			flags  = {.Loop},
-		}
-
-		player_anim_run := Animation {
-			size   = {120, 80},
-			offset = {52, 42},
-			start  = 0,
-			end    = 9,
-			row    = 2,
-			time   = 0.15,
-			flags  = {.Loop},
-		}
-
-		player_anim_attack := Animation {
-			size         = {120, 80},
-			offset       = {52, 42},
-			start        = 0,
-			end          = 3,
-			row          = 3,
-			time         = 0.15,
-			on_finish    = player_on_finish_attack,
-			timed_events = {{timer = 0.15, duration = 0.15, callback = player_attack_callback}},
-		}
-
-		data, ok := os.read_entire_file_from_filename("data/test.lvl")
-		assert(ok, "Failed to load level data")
-		x, y: f32
-		for v in data {
-			if v == '\n' {
-				y += TILE_SIZE
-				x = 0
-				continue
-			}
-			if v == '#' {
-				append(&gs.solid_tiles, rl.Rectangle{x, y, TILE_SIZE, TILE_SIZE})
-			}
-			if v == 'P' {
-				gs.player_id = entity_create(
-					{
-						x = x,
-						y = y,
-						width = 16,
-						height = 38,
-						move_speed = 280,
-						jump_force = 650,
-						on_enter = player_on_enter,
-						health = 5,
-						max_health = 5,
-						texture = &player_texture,
-						animations = {
-							"idle" = player_anim_idle,
-							"jump" = player_anim_jump,
-							"jump_fall_inbetween" = player_anim_jump_fall_inbetween,
-							"fall" = player_anim_fall,
-							"run" = player_anim_run,
-							"attack" = player_anim_attack,
-						},
-						current_anim_name = "idle",
-						animation_timer = 0.15,
-					},
-				)
-			}
-			if v == '^' {
-				id := entity_create(
-					Entity {
-						collider = Rect{x, y + SPIKE_DIFF, SPIKE_BREADTH, SPIKE_DEPTH},
-						on_enter = spike_on_enter,
-						flags = {.Kinematic, .Debug_Draw, .Immortal},
-						on_hit_damage = 1,
-						debug_color = rl.YELLOW,
-					},
-				)
-				gs.spikes[id] = .Up
-			}
-			if v == 'v' {
-				id := entity_create(
-					Entity {
-						collider = Rect{x, y, SPIKE_BREADTH, SPIKE_DEPTH},
-						on_enter = spike_on_enter,
-						flags = {.Kinematic, .Debug_Draw, .Immortal},
-						on_hit_damage = 1,
-						debug_color = rl.YELLOW,
-					},
-				)
-				gs.spikes[id] = .Down
-			}
-			if v == '>' {
-				id := entity_create(
-					Entity {
-						collider = Rect{x, y, SPIKE_DEPTH, SPIKE_BREADTH},
-						on_enter = spike_on_enter,
-						flags = {.Kinematic, .Debug_Draw, .Immortal},
-						on_hit_damage = 1,
-						debug_color = rl.YELLOW,
-					},
-				)
-				gs.spikes[id] = .Right
-			}
-			if v == '<' {
-				id := entity_create(
-					Entity {
-						collider = Rect{x + SPIKE_DIFF, y, SPIKE_DEPTH, SPIKE_BREADTH},
-						on_enter = spike_on_enter,
-						flags = {.Kinematic, .Debug_Draw, .Immortal},
-						on_hit_damage = 1,
-						debug_color = rl.YELLOW,
-					},
-				)
-				gs.spikes[id] = .Left
-			}
-			if v == 'e' {
-				entity_create(
-					Entity {
-						collider = Rect{x, y, TILE_SIZE, TILE_SIZE},
-						move_speed = 50,
-						flags = {.Debug_Draw, .Immortal},
-						behaviors = {.Walk, .Flip_At_Wall, .Flip_At_Edge},
-						debug_color = rl.RED,
-					},
-				)
-			}
-			x += TILE_SIZE
-		}
-	}
+	gs.font_48 = rl.LoadFontEx("assets/fonts/Gogh-ExtraBold.ttf", 48, nil, 256)
+	gs.font_64 = rl.LoadFontEx("assets/fonts/Gogh-ExtraBold.ttf", 64, nil, 256)
 
 	gs.camera = rl.Camera2D {
 		zoom = ZOOM,
 	}
 
 	for !rl.WindowShouldClose() {
+		switch gs.scene {
+		case .Main_Menu:
+			main_menu_update(&gs)
+		case .Game:
+			game_update(&gs)
+		}
+	}
+}
+
+game_init :: proc(gs: ^Game_State) {
+	gs.player_texture = rl.LoadTexture("assets/textures/player_120x80.png")
+
+	player_anim_idle := Animation {
+		size   = {120, 80},
+		offset = {52, 42},
+		start  = 0,
+		end    = 9,
+		row    = 0,
+		time   = 0.15,
+		flags  = {.Loop},
+	}
+
+	player_anim_jump := Animation {
+		size   = {120, 80},
+		offset = {52, 42},
+		start  = 0,
+		end    = 2,
+		row    = 1,
+		time   = 0.15,
+	}
+
+	player_anim_jump_fall_inbetween := Animation {
+		size   = {120, 80},
+		offset = {52, 42},
+		start  = 3,
+		end    = 4,
+		row    = 1,
+		time   = 0.15,
+	}
+
+	player_anim_fall := Animation {
+		size   = {120, 80},
+		offset = {52, 42},
+		start  = 5,
+		end    = 7,
+		row    = 1,
+		time   = 0.15,
+		flags  = {.Loop},
+	}
+
+	player_anim_run := Animation {
+		size   = {120, 80},
+		offset = {52, 42},
+		start  = 0,
+		end    = 9,
+		row    = 2,
+		time   = 0.15,
+		flags  = {.Loop},
+	}
+
+	player_anim_attack := Animation {
+		size         = {120, 80},
+		offset       = {52, 42},
+		start        = 0,
+		end          = 3,
+		row          = 3,
+		time         = 0.15,
+		on_finish    = player_on_finish_attack,
+		timed_events = {{timer = 0.15, duration = 0.15, callback = player_attack_callback}},
+	}
+
+	data, ok := os.read_entire_file_from_filename("data/test.lvl")
+	assert(ok, "Failed to load level data")
+	x, y: f32
+	for v in data {
+		if v == '\n' {
+			y += TILE_SIZE
+			x = 0
+			continue
+		}
+		if v == '#' {
+			append(&gs.solid_tiles, rl.Rectangle{x, y, TILE_SIZE, TILE_SIZE})
+		}
+		if v == 'P' {
+			gs.player_id = entity_create(
+				{
+					x = x,
+					y = y,
+					width = 16,
+					height = 38,
+					move_speed = 280,
+					jump_force = 650,
+					on_enter = player_on_enter,
+					health = 5,
+					max_health = 5,
+					texture = &gs.player_texture,
+					animations = {
+						"idle" = player_anim_idle,
+						"jump" = player_anim_jump,
+						"jump_fall_inbetween" = player_anim_jump_fall_inbetween,
+						"fall" = player_anim_fall,
+						"run" = player_anim_run,
+						"attack" = player_anim_attack,
+					},
+					current_anim_name = "idle",
+					animation_timer = 0.15,
+				},
+			)
+		}
+		if v == '^' {
+			id := entity_create(
+				Entity {
+					collider = Rect{x, y + SPIKE_DIFF, SPIKE_BREADTH, SPIKE_DEPTH},
+					on_enter = spike_on_enter,
+					flags = {.Kinematic, .Debug_Draw, .Immortal},
+					on_hit_damage = 1,
+					debug_color = rl.YELLOW,
+				},
+			)
+			gs.spikes[id] = .Up
+		}
+		if v == 'v' {
+			id := entity_create(
+				Entity {
+					collider = Rect{x, y, SPIKE_BREADTH, SPIKE_DEPTH},
+					on_enter = spike_on_enter,
+					flags = {.Kinematic, .Debug_Draw, .Immortal},
+					on_hit_damage = 1,
+					debug_color = rl.YELLOW,
+				},
+			)
+			gs.spikes[id] = .Down
+		}
+		if v == '>' {
+			id := entity_create(
+				Entity {
+					collider = Rect{x, y, SPIKE_DEPTH, SPIKE_BREADTH},
+					on_enter = spike_on_enter,
+					flags = {.Kinematic, .Debug_Draw, .Immortal},
+					on_hit_damage = 1,
+					debug_color = rl.YELLOW,
+				},
+			)
+			gs.spikes[id] = .Right
+		}
+		if v == '<' {
+			id := entity_create(
+				Entity {
+					collider = Rect{x + SPIKE_DIFF, y, SPIKE_DEPTH, SPIKE_BREADTH},
+					on_enter = spike_on_enter,
+					flags = {.Kinematic, .Debug_Draw, .Immortal},
+					on_hit_damage = 1,
+					debug_color = rl.YELLOW,
+				},
+			)
+			gs.spikes[id] = .Left
+		}
+		if v == 'e' {
+			entity_create(
+				Entity {
+					collider = Rect{x, y, TILE_SIZE, TILE_SIZE},
+					move_speed = 50,
+					flags = {.Debug_Draw, .Immortal},
+					behaviors = {.Walk, .Flip_At_Wall, .Flip_At_Edge},
+					debug_color = rl.RED,
+				},
+			)
+		}
+		x += TILE_SIZE
+	}
+
+	gs.scene = .Game
+}
+
+game_update :: proc(gs: ^Game_State) {
+	for !rl.WindowShouldClose() {
 		dt := rl.GetFrameTime()
 
 		player := entity_get(gs.player_id)
 
-		player_update(&gs, dt)
-		entity_update(&gs, dt)
+		player_update(gs, dt)
+		entity_update(gs, dt)
 		physics_update(gs.entities[:], gs.solid_tiles[:], dt)
 		behavior_update(gs.entities[:], gs.solid_tiles[:], dt)
 
@@ -423,3 +448,63 @@ main :: proc() {
 	}
 }
 
+main_menu_update :: proc(gs: ^Game_State) {
+	for !rl.WindowShouldClose() {
+		center := Vec2{WINDOW_WIDTH, WINDOW_HEIGHT} / 2
+		title_text: cstring = "Action Game Thing"
+		title_text_size := rl.MeasureTextEx(gs.font_64, title_text, 64, 4)
+
+		rl.BeginDrawing()
+		rl.ClearBackground({0, 0, 28, 255})
+
+		rl.DrawTextEx(
+			gs.font_64,
+			title_text,
+			{center.x - title_text_size.x / 2, center.y / 2},
+			64,
+			4,
+			rl.WHITE,
+		)
+
+		if main_menu_item_draw("Continue", center, rl.DARKGRAY, rl.DARKGRAY) {
+			// TODO
+		}
+
+		if main_menu_item_draw("New Game", center + {0, 60}) {
+			game_init(gs)
+			return
+		}
+
+		if main_menu_item_draw("Quit", center + {0, 120}) {
+			rl.CloseWindow()
+			return
+		}
+
+		rl.EndDrawing()
+	}
+}
+
+main_menu_item_draw :: proc(
+	text: cstring,
+	pos: Vec2,
+	color := rl.WHITE,
+	hover_color := rl.YELLOW,
+) -> (
+	pressed: bool,
+) {
+	pos := pos
+	text_size := rl.MeasureTextEx(gs.font_48, text, 48, 0)
+	pos.x -= text_size.x / 2
+	rect := Rect{pos.x, pos.y, text_size.x, text_size.y}
+
+	if rl.CheckCollisionPointRec(rl.GetMousePosition(), rect) {
+		rl.DrawTextEx(gs.font_48, text, pos, 48, 0, hover_color)
+		if rl.IsMouseButtonPressed(.LEFT) {
+			pressed = true
+		}
+	} else {
+		rl.DrawTextEx(gs.font_48, text, pos, 48, 0, color)
+	}
+
+	return
+}
