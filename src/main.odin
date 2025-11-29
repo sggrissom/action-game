@@ -26,7 +26,9 @@ LEFT :: Vec2{-1, 0}
 PLAYER_SAFE_RESET_TIME :: 1
 
 Vec2 :: rl.Vector2
+Vec4 :: rl.Vector4
 Rect :: rl.Rectangle
+Vec2i :: [2]i32
 Entity_Id :: distinct int
 
 Entity_Flags :: enum {
@@ -56,13 +58,19 @@ Scene_Type :: enum {
 	Game,
 }
 
+Tile :: struct {
+	pos: Vec2,
+	src: Vec2,
+	f:   u8,
+}
+
 Level :: struct {
 	id:           u32,
-	iid, name:    string,
 	player_spawn: Maybe(Vec2),
 	level_min:    Vec2,
 	level_max:    Vec2,
 	colliders:    [dynamic]Rect,
+	tiles:        [dynamic]Tile,
 }
 
 Entity :: struct {
@@ -100,6 +108,8 @@ Game_State :: struct {
 	font_48:               rl.Font,
 	font_64:               rl.Font,
 	level_definitions:     map[string]Level,
+	level:                 ^Level,
+	editor_enabled:        bool,
 }
 
 Animation :: struct {
@@ -363,39 +373,52 @@ game_update :: proc(gs: ^Game_State) {
 	for !rl.WindowShouldClose() {
 		dt := rl.GetFrameTime()
 
+		if rl.IsKeyPressed(.F5) {
+			gs.editor_enabled = !gs.editor_enabled
+		}
+
 		player := entity_get(gs.player_id)
 
-		player_update(gs, dt)
-		entity_update(gs, dt)
-		physics_update(gs.entities[:], gs.solid_tiles[:], dt)
-		behavior_update(gs.entities[:], gs.solid_tiles[:], dt)
+		if gs.editor_enabled {
+			editor_update(gs)
+		} else {
 
-		if .Grounded in player.flags {
-			pos := Vec2{player.x, player.y}
-			size := Vec2{player.width, player.height}
+			player_update(gs, dt)
+			entity_update(gs, dt)
+			physics_update(gs.entities[:], gs.solid_tiles[:], dt)
+			behavior_update(gs.entities[:], gs.solid_tiles[:], dt)
 
-			targets := make([dynamic]Rect, context.temp_allocator)
-			for e, i in gs.entities {
-				if Entity_Id(i) == gs.player_id do continue
-				if .Dead not_in e.flags {
-					append(&targets, e.collider)
+			if .Grounded in player.flags {
+				pos := Vec2{player.x, player.y}
+				size := Vec2{player.width, player.height}
+
+				targets := make([dynamic]Rect, context.temp_allocator)
+				for e, i in gs.entities {
+					if Entity_Id(i) == gs.player_id do continue
+					if .Dead not_in e.flags {
+						append(&targets, e.collider)
+					}
 				}
-			}
 
-			safety_check: {
-				_, hit_ground_left := raycast(pos + {0, size.y}, DOWN * 2, gs.solid_tiles[:])
-				if !hit_ground_left do break safety_check
+				safety_check: {
+					_, hit_ground_left := raycast(pos + {0, size.y}, DOWN * 2, gs.solid_tiles[:])
+					if !hit_ground_left do break safety_check
 
-				_, hit_ground_right := raycast(pos + size, DOWN * 2, gs.solid_tiles[:])
-				if !hit_ground_right do break safety_check
+					_, hit_ground_right := raycast(pos + size, DOWN * 2, gs.solid_tiles[:])
+					if !hit_ground_right do break safety_check
 
-				_, hit_entity_left := raycast(pos, LEFT * TILE_SIZE, targets[:])
-				if hit_entity_left do break safety_check
+					_, hit_entity_left := raycast(pos, LEFT * TILE_SIZE, targets[:])
+					if hit_entity_left do break safety_check
 
-				_, hit_entity_right := raycast(pos + {size.x, 0}, RIGHT * TILE_SIZE, targets[:])
-				if hit_entity_right do break safety_check
+					_, hit_entity_right := raycast(
+						pos + {size.x, 0},
+						RIGHT * TILE_SIZE,
+						targets[:],
+					)
+					if hit_entity_right do break safety_check
 
-				gs.safe_position = pos
+					gs.safe_position = pos
+				}
 			}
 		}
 
@@ -456,6 +479,11 @@ game_update :: proc(gs: ^Game_State) {
 
 		rl.EndMode2D()
 		rl.DrawFPS(10, 10)
+
+		if gs.editor_enabled {
+			editor_draw(gs)
+		}
+
 		rl.EndDrawing()
 
 		clear(&gs.debug_shapes)
@@ -530,7 +558,7 @@ combine_level_colliders :: proc(solid_tiles: []Rect, l: ^Level) {
 	for i in 1 ..< len(solid_tiles) {
 		rect := solid_tiles[i]
 
-		if rect.x == wide_rect.x + wide_rect.width {
+		if rect.x == wide_rect.x + wide_rect.width && rect.y == wide_rect.y {
 			wide_rect.width += TILE_SIZE
 		} else {
 			append(&wide_rects, wide_rect)
@@ -565,4 +593,13 @@ combine_level_colliders :: proc(solid_tiles: []Rect, l: ^Level) {
 	big_rect.x += l.level_min.x
 	big_rect.y += l.level_min.y
 	append(&l.colliders, big_rect)
+}
+
+recreate_level_colliders :: proc(l: ^Level) {
+	clear(&l.colliders)
+	solid_tiles := make([dynamic]Rect, context.temp_allocator)
+	for t in l.tiles {
+		append(&solid_tiles, Rect{t.pos.x, t.pos.y, TILE_SIZE, TILE_SIZE})
+	}
+	combine_level_colliders(solid_tiles[:], l)
 }
