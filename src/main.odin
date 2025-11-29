@@ -100,7 +100,6 @@ Game_State :: struct {
 	player_movement_state: Player_Movement_State,
 	camera:                rl.Camera2D,
 	entities:              [dynamic]Entity,
-	solid_tiles:           [dynamic]Rect,
 	spikes:                map[Entity_Id]Direction,
 	debug_shapes:          [dynamic]Debug_Shape,
 	player_texture:        rl.Texture,
@@ -266,105 +265,33 @@ game_init :: proc(gs: ^Game_State) {
 		timed_events = {{timer = 0.15, duration = 0.15, callback = player_attack_callback}},
 	}
 
-	data, ok := os.read_entire_file_from_filename("data/test.lvl")
-	assert(ok, "Failed to load level data")
-	x, y: f32
-	for v in data {
-		if v == '\n' {
-			y += TILE_SIZE
-			x = 0
-			continue
-		}
-		if v == '#' {
-			append(&gs.solid_tiles, rl.Rectangle{x, y, TILE_SIZE, TILE_SIZE})
-		}
-		if v == 'P' {
-			gs.player_id = entity_create(
-				{
-					x = x,
-					y = y,
-					width = 16,
-					height = 38,
-					move_speed = 280,
-					jump_force = 650,
-					on_enter = player_on_enter,
-					health = 5,
-					max_health = 5,
-					texture = &gs.player_texture,
-					animations = {
-						"idle" = player_anim_idle,
-						"jump" = player_anim_jump,
-						"jump_fall_inbetween" = player_anim_jump_fall_inbetween,
-						"fall" = player_anim_fall,
-						"run" = player_anim_run,
-						"attack" = player_anim_attack,
-					},
-					current_anim_name = "idle",
-					animation_timer = 0.15,
-				},
-			)
-		}
-		if v == '^' {
-			id := entity_create(
-				Entity {
-					collider = Rect{x, y + SPIKE_DIFF, SPIKE_BREADTH, SPIKE_DEPTH},
-					on_enter = spike_on_enter,
-					flags = {.Kinematic, .Debug_Draw, .Immortal},
-					on_hit_damage = 1,
-					debug_color = rl.YELLOW,
-				},
-			)
-			gs.spikes[id] = .Up
-		}
-		if v == 'v' {
-			id := entity_create(
-				Entity {
-					collider = Rect{x, y, SPIKE_BREADTH, SPIKE_DEPTH},
-					on_enter = spike_on_enter,
-					flags = {.Kinematic, .Debug_Draw, .Immortal},
-					on_hit_damage = 1,
-					debug_color = rl.YELLOW,
-				},
-			)
-			gs.spikes[id] = .Down
-		}
-		if v == '>' {
-			id := entity_create(
-				Entity {
-					collider = Rect{x, y, SPIKE_DEPTH, SPIKE_BREADTH},
-					on_enter = spike_on_enter,
-					flags = {.Kinematic, .Debug_Draw, .Immortal},
-					on_hit_damage = 1,
-					debug_color = rl.YELLOW,
-				},
-			)
-			gs.spikes[id] = .Right
-		}
-		if v == '<' {
-			id := entity_create(
-				Entity {
-					collider = Rect{x + SPIKE_DIFF, y, SPIKE_DEPTH, SPIKE_BREADTH},
-					on_enter = spike_on_enter,
-					flags = {.Kinematic, .Debug_Draw, .Immortal},
-					on_hit_damage = 1,
-					debug_color = rl.YELLOW,
-				},
-			)
-			gs.spikes[id] = .Left
-		}
-		if v == 'e' {
-			entity_create(
-				Entity {
-					collider = Rect{x, y, TILE_SIZE, TILE_SIZE},
-					move_speed = 50,
-					flags = {.Debug_Draw, .Immortal},
-					behaviors = {.Walk, .Flip_At_Wall, .Flip_At_Edge},
-					debug_color = rl.RED,
-				},
-			)
-		}
-		x += TILE_SIZE
-	}
+	gs.level = &gs.level_definitions["BINARY_TEST"]
+
+	spawn := gs.level.player_spawn.? or_else Vec2{100, 100}
+	gs.player_id = entity_create(
+		{
+			x = spawn.x,
+			y = spawn.y,
+			width = 16,
+			height = 38,
+			move_speed = 280,
+			jump_force = 650,
+			on_enter = player_on_enter,
+			health = 5,
+			max_health = 5,
+			texture = &gs.player_texture,
+			animations = {
+				"idle" = player_anim_idle,
+				"jump" = player_anim_jump,
+				"jump_fall_inbetween" = player_anim_jump_fall_inbetween,
+				"fall" = player_anim_fall,
+				"run" = player_anim_run,
+				"attack" = player_anim_attack,
+			},
+			current_anim_name = "idle",
+			animation_timer = 0.15,
+		},
+	)
 
 	gs.scene = .Game
 }
@@ -385,8 +312,8 @@ game_update :: proc(gs: ^Game_State) {
 
 			player_update(gs, dt)
 			entity_update(gs, dt)
-			physics_update(gs.entities[:], gs.solid_tiles[:], dt)
-			behavior_update(gs.entities[:], gs.solid_tiles[:], dt)
+			physics_update(gs.entities[:], gs.level.colliders[:], dt)
+			behavior_update(gs.entities[:], gs.level.colliders[:], dt)
 
 			if .Grounded in player.flags {
 				pos := Vec2{player.x, player.y}
@@ -401,10 +328,10 @@ game_update :: proc(gs: ^Game_State) {
 				}
 
 				safety_check: {
-					_, hit_ground_left := raycast(pos + {0, size.y}, DOWN * 2, gs.solid_tiles[:])
+					_, hit_ground_left := raycast(pos + {0, size.y}, DOWN * 2, gs.level.colliders[:])
 					if !hit_ground_left do break safety_check
 
-					_, hit_ground_right := raycast(pos + size, DOWN * 2, gs.solid_tiles[:])
+					_, hit_ground_right := raycast(pos + size, DOWN * 2, gs.level.colliders[:])
 					if !hit_ground_right do break safety_check
 
 					_, hit_entity_left := raycast(pos, LEFT * TILE_SIZE, targets[:])
@@ -426,7 +353,7 @@ game_update :: proc(gs: ^Game_State) {
 		rl.BeginMode2D(gs.camera)
 		rl.ClearBackground(BG_COLOR)
 
-		for rect in gs.solid_tiles {
+		for rect in gs.level.colliders {
 			rl.DrawRectangleRec(rect, rl.WHITE)
 			rl.DrawRectangleLinesEx(rect, 1, rl.GRAY)
 		}
