@@ -3,6 +3,7 @@ package main
 
 import "core:fmt"
 import "core:os"
+import "core:slice"
 import "core:time"
 import rl "vendor:raylib"
 
@@ -55,6 +56,15 @@ Scene_Type :: enum {
 	Game,
 }
 
+Level :: struct {
+	id:           u32,
+	iid, name:    string,
+	player_spawn: Maybe(Vec2),
+	level_min:    Vec2,
+	level_max:    Vec2,
+	colliders:    [dynamic]Rect,
+}
+
 Entity :: struct {
 	using collider:             Rect,
 	vel:                        Vec2,
@@ -89,6 +99,7 @@ Game_State :: struct {
 	scene:                 Scene_Type,
 	font_48:               rl.Font,
 	font_64:               rl.Font,
+	level_definitions:     map[string]Level,
 }
 
 Animation :: struct {
@@ -162,6 +173,9 @@ gs: Game_State
 main :: proc() {
 	rl.InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "simple test")
 	rl.SetTargetFPS(60)
+
+	world_data_save()
+	world_data_load()
 
 	gs.font_48 = rl.LoadFontEx("assets/fonts/Gogh-ExtraBold.ttf", 48, nil, 256)
 	gs.font_64 = rl.LoadFontEx("assets/fonts/Gogh-ExtraBold.ttf", 64, nil, 256)
@@ -507,4 +521,48 @@ main_menu_item_draw :: proc(
 	}
 
 	return
+}
+
+combine_level_colliders :: proc(solid_tiles: []Rect, l: ^Level) {
+	wide_rect := solid_tiles[0]
+	wide_rects := make([dynamic]Rect, context.temp_allocator)
+
+	for i in 1 ..< len(solid_tiles) {
+		rect := solid_tiles[i]
+
+		if rect.x == wide_rect.x + wide_rect.width {
+			wide_rect.width += TILE_SIZE
+		} else {
+			append(&wide_rects, wide_rect)
+			wide_rect = rect
+		}
+	}
+
+	append(&wide_rects, wide_rect)
+
+	slice.sort_by(wide_rects[:], proc(a, b: Rect) -> bool {
+		if a.x != b.x do return a.x < b.x
+		return a.y < b.y
+	})
+
+	big_rect := wide_rects[0]
+
+	for i in 1 ..< len(wide_rects) {
+		rect := wide_rects[i]
+
+		if rect.x == big_rect.x &&
+		   big_rect.width == rect.width &&
+		   big_rect.y + big_rect.height == rect.y {
+			big_rect.height += TILE_SIZE
+		} else {
+			big_rect.x += l.level_min.x
+			big_rect.y += l.level_min.y
+			append(&l.colliders, big_rect)
+			big_rect = rect
+		}
+	}
+
+	big_rect.x += l.level_min.x
+	big_rect.y += l.level_min.y
+	append(&l.colliders, big_rect)
 }
