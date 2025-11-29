@@ -64,6 +64,11 @@ Tile :: struct {
 	f:   u8,
 }
 
+Spike :: struct {
+	collider: Rect,
+	facing:   Direction,
+}
+
 Level :: struct {
 	id:           u32,
 	player_spawn: Maybe(Vec2),
@@ -71,6 +76,7 @@ Level :: struct {
 	level_max:    Vec2,
 	colliders:    [dynamic]Rect,
 	tiles:        [dynamic]Tile,
+	spikes:       [dynamic]Spike,
 }
 
 Entity :: struct {
@@ -100,7 +106,6 @@ Game_State :: struct {
 	player_movement_state: Player_Movement_State,
 	camera:                rl.Camera2D,
 	entities:              [dynamic]Entity,
-	spikes:                map[Entity_Id]Direction,
 	debug_shapes:          [dynamic]Debug_Shape,
 	player_texture:        rl.Texture,
 	scene:                 Scene_Type,
@@ -132,40 +137,6 @@ Animation_Event :: struct {
 	timer:    f32,
 	duration: f32,
 	callback: proc(gs: ^Game_State, entity: ^Entity),
-}
-
-spike_on_enter :: proc(self_id, other_id: Entity_Id) {
-	self := entity_get(self_id)
-	other := entity_get(other_id)
-
-	if other_id == gs.player_id {
-		other.x = gs.safe_position.x
-		other.y = gs.safe_position.y
-		other.vel = 0
-		gs.safe_reset_timer = PLAYER_SAFE_RESET_TIME
-		gs.player_movement_state = .Uncontrollable
-		switch_animation(other, "idle")
-	}
-
-	dir := gs.spikes[self_id]
-	switch dir {
-	case .Up:
-		if other.vel.y > 0 {
-			fmt.println("spikes face Up")
-		}
-	case .Right:
-		if other.vel.x < 0 {
-			fmt.println("spikes face Right")
-		}
-	case .Down:
-		if other.vel.y < 0 {
-			fmt.println("spikes face Down")
-		}
-	case .Left:
-		if other.vel.x > 0 {
-			fmt.println("spikes face Left")
-		}
-	}
 }
 
 player_on_enter :: proc(self_id, other_id: Entity_Id) {
@@ -328,7 +299,17 @@ game_update :: proc(gs: ^Game_State) {
 				}
 
 				safety_check: {
-					_, hit_ground_left := raycast(pos + {0, size.y}, DOWN * 2, gs.level.colliders[:])
+					for spike in gs.level.spikes {
+						if rl.CheckCollisionRecs(spike.collider, player.collider) {
+							break safety_check
+						}
+					}
+
+					_, hit_ground_left := raycast(
+						pos + {0, size.y},
+						DOWN * 2,
+						gs.level.colliders[:],
+					)
 					if !hit_ground_left do break safety_check
 
 					_, hit_ground_right := raycast(pos + size, DOWN * 2, gs.level.colliders[:])
@@ -356,6 +337,10 @@ game_update :: proc(gs: ^Game_State) {
 		for rect in gs.level.colliders {
 			rl.DrawRectangleRec(rect, rl.WHITE)
 			rl.DrawRectangleLinesEx(rect, 1, rl.GRAY)
+		}
+
+		for spike in gs.level.spikes {
+			rl.DrawRectangleLinesEx(spike.collider, 1, rl.YELLOW)
 		}
 
 		for &e in gs.entities {

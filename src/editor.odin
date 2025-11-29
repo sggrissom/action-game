@@ -8,6 +8,7 @@ import rl "vendor:raylib"
 Editor_Tool :: enum {
 	None,
 	Tile,
+	Spike,
 }
 
 Editor_State :: struct {
@@ -22,6 +23,9 @@ es: Editor_State
 editor_update :: proc(gs: ^Game_State) {
 	if rl.IsKeyPressed(.T) {
 		es.tool = .Tile
+	}
+	if rl.IsKeyPressed(.S) {
+		es.tool = .Spike
 	}
 
 	pos := rl.GetMousePosition() + gs.camera.target * gs.camera.zoom
@@ -59,6 +63,33 @@ editor_update :: proc(gs: ^Game_State) {
 					}
 				}
 			}
+		}
+	case .Spike:
+		if rl.IsMouseButtonPressed(.LEFT) || rl.IsMouseButtonPressed(.RIGHT) {
+			es.area_begin = coords
+			es.area_end = coords
+		}
+
+		if rl.IsMouseButtonDown(.LEFT) || rl.IsMouseButtonDown(.RIGHT) {
+			rect := rect_from_coords_any_orientation(es.area_begin, coords)
+			if rect.width > rect.height {
+				es.area_end.x = coords.x
+				es.area_end.y = es.area_begin.y
+			}
+			if rect.height > rect.width {
+				es.area_end.x = es.area_begin.x
+				es.area_end.y = coords.y
+			}
+		}
+
+		if rl.IsMouseButtonReleased(.LEFT) {
+			rect := rect_from_coords_any_orientation(es.area_begin, es.area_end)
+			editor_place_spikes(rect, gs.level)
+		}
+
+		if rl.IsMouseButtonReleased(.RIGHT) {
+			rect := rect_from_coords_any_orientation(es.area_begin, es.area_end)
+			editor_remove_spikes(rect, gs.level)
 		}
 	}
 }
@@ -107,6 +138,10 @@ editor_place_tile :: proc(coords: Vec2i, l: ^Level) {
 			return a.pos.x < b.pos.x
 		})
 
+		pos := pos_from_coords(coords)
+		rect := Rect{pos.x, pos.y, TILE_SIZE, TILE_SIZE}
+		editor_remove_spikes(rect, l)
+
 		recreate_level_colliders(l)
 	}
 }
@@ -139,4 +174,82 @@ rect_from_coords_any_orientation :: proc(a, b: Vec2i) -> Rect {
 	right := f32(max(a.x, b.x)) * TILE_SIZE
 
 	return Rect{left, top, right - left + TILE_SIZE, bottom - top + TILE_SIZE}
+}
+
+editor_place_spikes :: proc(rect: Rect, l: ^Level) {
+	coords := coords_from_pos({rect.x, rect.y})
+	cols := int(rect.width) / TILE_SIZE
+	rows := int(rect.height) / TILE_SIZE
+
+	for y in 0 ..< rows {
+		for x in 0 ..< cols {
+			editor_remove_tile(coords + {i32(x), i32(y)}, l)
+		}
+	}
+
+	editor_remove_spikes(rect, l)
+
+	spike: Spike
+	spike.collider = rect
+	if facing, ok := determine_spike_facing(rect, l); ok {
+		spike.facing = facing
+		switch facing {
+		case .Up:
+			spike.collider.y += SPIKE_DIFF
+			spike.collider.height = SPIKE_DEPTH
+		case .Right:
+			spike.collider.width = SPIKE_DEPTH
+		case .Down:
+			spike.collider.height = SPIKE_DEPTH
+		case .Left:
+			spike.collider.width = SPIKE_DEPTH
+			spike.collider.x += SPIKE_DIFF
+		}
+		append(&l.spikes, spike)
+	}
+}
+
+determine_spike_facing :: proc(rect: Rect, l: ^Level) -> (facing: Direction, ok: bool) {
+	begin_coords := coords_from_pos({rect.x, rect.y})
+	end_coords := coords_from_pos({rect.x + rect.width, rect.y + rect.height})
+
+	// Check Below, Facing Up
+	if is_area_tiled(begin_coords + {0, 1}, end_coords + {0, 1}, l) {
+		return .Up, true
+	}
+
+	// Check Above, Facing Down
+	if is_area_tiled(begin_coords + {0, -1}, end_coords + {0, -1}, l) {
+		return .Down, true
+	}
+	// Check Right, Facing Left
+	if is_area_tiled(begin_coords + {1, 0}, end_coords + {1, 0}, l) {
+		return .Left, true
+	}
+
+	// Check Left, Facing Right
+	if is_area_tiled(begin_coords + {-1, 0}, end_coords + {-1, 0}, l) {
+		return .Right, true
+	}
+
+	return .Up, false
+}
+
+editor_remove_spikes :: proc(rect: Rect, l: ^Level) {
+	#reverse for spike, i in l.spikes {
+		if rl.CheckCollisionRecs(rect, spike.collider) {
+			ordered_remove(&l.spikes, i)
+		}
+	}
+}
+
+is_area_tiled :: proc(begin: Vec2i, end: Vec2i, l: ^Level) -> bool {
+	for y in begin.y ..< end.y {
+		for x in begin.x ..< end.x {
+			if !is_tile_at(Vec2i{x, y}, l) {
+				return false
+			}
+		}
+	}
+	return true
 }

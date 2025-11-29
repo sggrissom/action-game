@@ -63,6 +63,19 @@ player_update :: proc(gs: ^Game_State, dt: f32) {
 		}
 		try_attack(gs, player)
 	}
+
+	// Spike collision - reset to safe position
+	for spike in gs.level.spikes {
+		if rl.CheckCollisionRecs(spike.collider, player.collider) {
+			player.x = gs.safe_position.x
+			player.y = gs.safe_position.y
+			player.vel = 0
+			gs.safe_reset_timer = PLAYER_SAFE_RESET_TIME
+			gs.player_movement_state = .Uncontrollable
+			switch_animation(player, "idle")
+			break
+		}
+	}
 }
 
 try_run :: proc(gs: ^Game_State, player: ^Entity) {
