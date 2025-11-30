@@ -1,15 +1,15 @@
 #+feature dynamic-literals
 package main
 
-import "core:fmt"
-import "core:os"
 import "core:slice"
 import "core:time"
 import rl "vendor:raylib"
 
 WINDOW_WIDTH :: 1280
 WINDOW_HEIGHT :: 720
-ZOOM :: 2
+RENDER_WIDTH :: 640
+RENDER_HEIGHT :: 360
+ZOOM :: WINDOW_WIDTH / RENDER_WIDTH
 BG_COLOR :: rl.BLACK
 TILE_SIZE :: 16
 PHYSICS_ITERATIONS :: 8
@@ -154,7 +154,6 @@ main :: proc() {
 	rl.InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "simple test")
 	rl.SetTargetFPS(60)
 
-	world_data_save()
 	world_data_load()
 
 	gs.font_48 = rl.LoadFontEx("assets/fonts/Gogh-ExtraBold.ttf", 48, nil, 256)
@@ -271,8 +270,9 @@ game_update :: proc(gs: ^Game_State) {
 	for !rl.WindowShouldClose() {
 		dt := rl.GetFrameTime()
 
-		if rl.IsKeyPressed(.F5) {
+		if rl.IsKeyPressed(.TAB) {
 			gs.editor_enabled = !gs.editor_enabled
+			gs.camera.zoom = ZOOM
 		}
 
 		player := entity_get(gs.player_id)
@@ -285,6 +285,29 @@ game_update :: proc(gs: ^Game_State) {
 			entity_update(gs, dt)
 			physics_update(gs.entities[:], gs.level.colliders[:], dt)
 			behavior_update(gs.entities[:], gs.level.colliders[:], dt)
+
+			{
+				render_half_size := Vec2{RENDER_WIDTH, RENDER_HEIGHT} / 2
+
+				gs.camera.target = {player.x, player.y} - render_half_size
+
+				if gs.camera.target.x < gs.level.level_min.x {
+					gs.camera.target.x = gs.level.level_min.x
+				}
+
+				if gs.camera.target.y < gs.level.level_min.y {
+					gs.camera.target.y = gs.level.level_min.y
+				}
+
+				if gs.camera.target.x + RENDER_WIDTH > gs.level.level_max.x {
+					gs.camera.target.x = gs.level.level_max.x - RENDER_WIDTH
+				}
+
+				if gs.camera.target.y + RENDER_HEIGHT > gs.level.level_max.y {
+					gs.camera.target.y = gs.level.level_max.y - RENDER_HEIGHT
+				}
+			}
+
 
 			if .Grounded in player.flags {
 				pos := Vec2{player.x, player.y}

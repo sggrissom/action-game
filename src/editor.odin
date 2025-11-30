@@ -1,6 +1,7 @@
 package main
 
 import "core:fmt"
+import "core:math"
 import "core:math/linalg"
 import "core:slice"
 import rl "vendor:raylib"
@@ -9,23 +10,61 @@ Editor_Tool :: enum {
 	None,
 	Tile,
 	Spike,
+	Level,
 }
 
 Editor_State :: struct {
-	tool:       Editor_Tool,
-	area_begin: Vec2i,
-	area_end:   Vec2i,
+	tool:          Editor_Tool,
+	previous_tool: Editor_Tool,
+	area_begin:    Vec2i,
+	area_end:      Vec2i,
 }
 
 @(private = "file")
 es: Editor_State
 
 editor_update :: proc(gs: ^Game_State) {
-	if rl.IsKeyPressed(.T) {
-		es.tool = .Tile
+	scroll := rl.GetMouseWheelMove()
+	if rl.IsKeyPressed(.LEFT_BRACKET) {
+		scroll -= 1
 	}
-	if rl.IsKeyPressed(.S) {
-		es.tool = .Spike
+	if rl.IsKeyPressed(.RIGHT_BRACKET) {
+		scroll += 1
+	}
+	if scroll != 0 {
+		mouse_pos := rl.GetMousePosition()
+
+		mouse_world_pos := rl.GetScreenToWorld2D(mouse_pos, gs.camera)
+
+		gs.camera.zoom = clamp(gs.camera.zoom + scroll * 0.25, 0.25, 8)
+
+		mouse_world_pos_new := rl.GetScreenToWorld2D(mouse_pos, gs.camera)
+
+		gs.camera.target += (mouse_world_pos - mouse_world_pos_new)
+	}
+
+	if es.tool == .Level {
+		if gs.camera.zoom >= 1 {
+			es.tool = es.previous_tool
+		}
+	} else {
+		if rl.IsKeyPressed(.T) {
+			es.tool = .Tile
+		}
+
+		if rl.IsKeyPressed(.S) {
+			es.tool = .Spike
+		}
+
+		es.previous_tool = es.tool
+		if gs.camera.zoom < 1 {
+			es.tool = .Level
+		}
+	}
+
+	if rl.IsMouseButtonDown(.MIDDLE) {
+		mouse_delta := rl.GetMouseDelta()
+		gs.camera.target -= mouse_delta / gs.camera.zoom
 	}
 
 	pos := rl.GetMousePosition() + gs.camera.target * gs.camera.zoom
@@ -91,12 +130,31 @@ editor_update :: proc(gs: ^Game_State) {
 			rect := rect_from_coords_any_orientation(es.area_begin, es.area_end)
 			editor_remove_spikes(rect, gs.level)
 		}
+	case .Level:
+		if rl.IsMouseButtonPressed(.LEFT) || rl.IsMouseButtonPressed(.RIGHT) {
+			es.area_begin = coords
+		}
+
+		if rl.IsMouseButtonDown(.LEFT) || rl.IsMouseButtonDown(.RIGHT) {
+			es.area_end = coords
+		}
 	}
 }
 
 editor_draw :: proc(gs: ^Game_State) {
-	rl.DrawTextEx(gs.font_48, "EDITOR MODE", {8, 8}, 48, 0, rl.WHITE)
-	rl.DrawTextEx(gs.font_48, fmt.ctprintf("Tool: %s", es.tool), {8, 48}, 48, 0, rl.WHITE)
+	rl.DrawTextEx(
+		gs.font_48,
+		fmt.ctprintf(
+			"Tool: %s\nCamera.Zoom: %v\nCamera.Target: %v",
+			es.tool,
+			gs.camera.zoom,
+			gs.camera.target,
+		),
+		{8, 8},
+		24,
+		0,
+		rl.WHITE,
+	)
 
 	place := rl.IsMouseButtonDown(.LEFT)
 	remove := rl.IsMouseButtonDown(.RIGHT)
@@ -108,6 +166,37 @@ editor_draw :: proc(gs: ^Game_State) {
 
 		rect = rect_scale_all(rect, gs.camera.zoom)
 		rl.DrawRectangleLinesEx(rect, 4, place ? rl.WHITE : rl.RED)
+		if es.tool == .Level {
+			one_screen_rect := rect
+			one_screen_rect.width =
+				math.ceil(f32(RENDER_WIDTH) / TILE_SIZE) * TILE_SIZE * gs.camera.zoom
+			one_screen_rect.height =
+				math.ceil(f32(RENDER_HEIGHT) / TILE_SIZE) * TILE_SIZE * gs.camera.zoom
+			rl.DrawRectangleLinesEx(one_screen_rect, 1, rl.DARKGRAY)
+		}
+	}
+
+	for _, ld in gs.level_definitions {
+		level_min := ld.level_min - gs.camera.target
+		level_max := ld.level_max - gs.camera.target
+		level_size := level_max - level_min
+		level_rect := Rect{level_min.x, level_min.y, level_size.x, level_size.y}
+		level_rect = rect_scale_all(level_rect, gs.camera.zoom)
+
+		color := ld.id == gs.level.id ? rl.WHITE : rl.GRAY
+		thickness := f32(1)
+
+		if es.tool == .Level {
+			thickness = 4
+			text := fmt.ctprintf("level_%d", ld.id)
+			text_size := rl.MeasureTextEx(gs.font_48, text, 48, 0)
+			text_pos :=
+				Vec2{level_rect.x, level_rect.y} +
+				({level_rect.width, level_rect.height} - text_size) / 2
+			rl.DrawTextEx(gs.font_48, text, text_pos, 48, 0, {255, 255, 255, 128})
+		}
+
+		rl.DrawRectangleLinesEx(level_rect, thickness, color)
 	}
 }
 
