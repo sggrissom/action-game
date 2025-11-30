@@ -14,3 +14,15 @@ coords_from_pos :: proc(pos: Vec2) -> Vec2i {
 pos_from_coords :: proc(coords: Vec2i) -> Vec2 {
 	return Vec2{f32(coords.x), f32(coords.y)} * TILE_SIZE
 }
+
+rect_center :: #force_inline proc(r: Rect) -> Vec2 {
+	return Vec2{r.x, r.y} + Vec2{r.width, r.height} * 0.5
+}
+
+rect_from_pos_size :: #force_inline proc(pos, size: Vec2) -> Rect {
+	return Rect{pos.x, pos.y, size.x, size.y}
+}
+
+rect_pos_add :: #force_inline proc(rect: Rect, v: Vec2) -> Rect {
+	return Rect{rect.x + v.x, rect.y + v.y, rect.width, rect.height}
+}
