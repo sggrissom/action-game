@@ -176,10 +176,9 @@ editor_draw :: proc(gs: ^Game_State) {
 		}
 	}
 
-	for _, ld in gs.level_definitions {
-		level_min := ld.level_min - gs.camera.target
-		level_max := ld.level_max - gs.camera.target
-		level_size := level_max - level_min
+	for &ld in gs.levels {
+		level_min := ld.pos - gs.camera.target
+		level_size := ld.size
 		level_rect := Rect{level_min.x, level_min.y, level_size.x, level_size.y}
 		level_rect = rect_scale_all(level_rect, gs.camera.zoom)
 

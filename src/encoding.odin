@@ -92,7 +92,7 @@ world_data_load :: proc() {
 		assert(level_header.magic == LEVEL_MAGIC)
 
 		level.id = level_header.id
-		level.level_max = Vec2{f32(level_header.width), f32(level_header.height)} * TILE_SIZE
+		level.size = Vec2{f32(level_header.width), f32(level_header.height)} * TILE_SIZE
 
 		solid_tiles := make([dynamic]Rect, context.temp_allocator)
 
@@ -108,9 +108,9 @@ world_data_load :: proc() {
 			}
 		}
 
-		combine_level_colliders(solid_tiles[:], &level)
+		combine_colliders({0, 0}, solid_tiles[:], &gs.colliders)
 
 		level.player_spawn = Vec2{100, 100}
-		gs.level_definitions["BINARY_TEST"] = level
+		append(&gs.levels, level)
 	}
 }

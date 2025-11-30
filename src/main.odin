@@ -1,6 +1,7 @@
 #+feature dynamic-literals
 package main
 
+import "core:log"
 import "core:slice"
 import "core:time"
 import rl "vendor:raylib"
@@ -24,6 +25,7 @@ DOWN :: Vec2{0, 1}
 LEFT :: Vec2{-1, 0}
 
 PLAYER_SAFE_RESET_TIME :: 1
+FIRST_LEVEL_ID :: 1
 
 Vec2 :: rl.Vector2
 Vec4 :: rl.Vector4
@@ -69,14 +71,55 @@ Spike :: struct {
 	facing:   Direction,
 }
 
+Enemy_Type :: enum {
+	Walker,
+	Jumper,
+	Charger,
+	Orb,
+}
+
+Enemy_Spawn :: struct {
+	type: Enemy_Type,
+	pos:  Vec2,
+}
+
+Falling_Log_Spawn :: struct {
+	rect: Rect,
+}
+
+Checkpoint :: struct {
+	id:  u32,
+	pos: Vec2,
+}
+
+Power_Up_Spawn :: struct {
+	type: Power_Up_Type,
+	pos:  Vec2,
+}
+
+Power_Up_Type :: enum {
+	Dash,
+}
+
+Door :: struct {
+	id:       u32,
+	to_level: u32,
+	to_id:    u32,
+	rect:     Rect,
+}
+
 Level :: struct {
 	id:           u32,
+	pos:          Vec2,
+	size:         Vec2,
 	player_spawn: Maybe(Vec2),
-	level_min:    Vec2,
-	level_max:    Vec2,
-	colliders:    [dynamic]Rect,
-	tiles:        [dynamic]Tile,
+	name:         string,
+	enemy_spawns: [dynamic]Enemy_Spawn,
+	doors:        [dynamic]Door,
 	spikes:       [dynamic]Spike,
+	checkpoints:  [dynamic]Checkpoint,
+	tiles:        [dynamic]Tile,
+	on_enter:     proc(gs: ^Game_State),
 }
 
 Entity :: struct {
@@ -85,6 +128,7 @@ Entity :: struct {
 	move_speed:                 f32,
 	jump_force:                 f32,
 	on_enter, on_stay, on_exit: proc(self_id, other_id: Entity_Id),
+	on_death:                   proc(entity: ^Entity, gs: ^Game_State),
 	entity_ids:                 map[Entity_Id]time.Time,
 	flags:                      bit_set[Entity_Flags],
 	debug_color:                rl.Color,
@@ -107,25 +151,35 @@ Game_State :: struct {
 	camera:                rl.Camera2D,
 	entities:              [dynamic]Entity,
 	debug_shapes:          [dynamic]Debug_Shape,
+	colliders:             [dynamic]Rect,
 	player_texture:        rl.Texture,
 	scene:                 Scene_Type,
 	font_48:               rl.Font,
 	font_64:               rl.Font,
-	level_definitions:     map[string]Level,
 	level:                 ^Level,
+	levels:                [dynamic]Level,
+	checkpoint_level_id:   u32,
+	checkpoint_id:         u32,
 	editor_enabled:        bool,
 }
 
+Save_Data :: struct {
+	level_id:          u32,
+	checkpoint_id:     u32,
+	visited_level_ids: [dynamic]u32,
+}
+
 Animation :: struct {
-	size:         Vec2,
-	offset:       Vec2,
-	start:        int,
-	end:          int,
-	row:          int,
-	time:         f32,
-	flags:        bit_set[Animation_Flags],
-	on_finish:    proc(gs: ^Game_State, entity: ^Entity),
-	timed_events: [dynamic]Animation_Event,
+	size:           Vec2,
+	offset:         Vec2,
+	offset_flipped: Vec2,
+	start:          int,
+	end:            int,
+	row:            int,
+	time:           f32,
+	flags:          bit_set[Animation_Flags],
+	on_finish:      proc(gs: ^Game_State, entity: ^Entity),
+	timed_events:   [dynamic]Animation_Event,
 }
 
 Animation_Flags :: enum {
@@ -146,6 +200,139 @@ player_on_enter :: proc(self_id, other_id: Entity_Id) {
 	if other.on_hit_damage > 0 {
 		player.health -= other.on_hit_damage
 	}
+}
+
+level_load :: proc(gs: ^Game_State, id: u32, player_spawn: Maybe(Vec2) = nil) {
+	level := level_from_id(gs.levels[:], id)
+	if level == nil {
+		log.fatalf("Level with id `%d` could not be found.", id)
+	}
+	gs.level = level
+
+	clear(&gs.entities)
+
+	spawn_player(gs)
+
+	if level.on_enter != nil {
+		level.on_enter(gs)
+	}
+
+}
+
+spawn_player :: proc(gs: ^Game_State) {
+	player_anim_idle := Animation {
+		size           = {120, 80},
+		offset         = {52, 42},
+		offset_flipped = {52, 42},
+		start          = 0,
+		end            = 9,
+		row            = 0,
+		time           = 0.075,
+		flags          = {.Loop},
+	}
+
+	player_anim_jump := Animation {
+		size           = {120, 80},
+		offset         = {52, 42},
+		offset_flipped = {52, 42},
+		start          = 0,
+		end            = 2,
+		row            = 1,
+		time           = 0.075,
+	}
+
+	player_anim_jump_fall_inbetween := Animation {
+		size           = {120, 80},
+		offset         = {52, 42},
+		offset_flipped = {52, 42},
+		start          = 3,
+		end            = 4,
+		row            = 1,
+		time           = 0.075,
+	}
+
+	player_anim_fall := Animation {
+		size           = {120, 80},
+		offset         = {52, 42},
+		offset_flipped = {52, 42},
+		start          = 5,
+		end            = 7,
+		row            = 1,
+		time           = 0.075,
+		flags          = {.Loop},
+	}
+
+	player_anim_run := Animation {
+		size           = {120, 80},
+		offset         = {52, 42},
+		offset_flipped = {52, 42},
+		start          = 0,
+		end            = 9,
+		row            = 2,
+		time           = 0.075,
+		flags          = {.Loop},
+	}
+
+	player_anim_attack := Animation {
+		size           = {120, 80},
+		offset         = {52, 42},
+		offset_flipped = {52, 42},
+		start          = 0,
+		end            = 3,
+		row            = 3,
+		time           = 0.05,
+		on_finish      = player_on_finish_attack,
+		timed_events   = {{timer = 0.05, duration = 0.05, callback = player_attack_callback}},
+	}
+
+	player_anim_dash := Animation {
+		size           = {120, 80},
+		offset         = {52, 42},
+		offset_flipped = {52, 42},
+		start          = 4,
+		end            = 5,
+		row            = 3,
+		time           = 0.075,
+	}
+
+	gs.player_id = entity_create(
+		{
+			x = gs.level.player_spawn.?.x,
+			y = gs.level.player_spawn.?.y,
+			width = 16,
+			height = 38,
+			move_speed = 220,
+			jump_force = 650,
+			on_enter = player_on_enter,
+			health = 7,
+			max_health = 7,
+			debug_color = rl.GREEN,
+			texture = &gs.player_texture,
+			animations = {
+				"idle" = player_anim_idle,
+				"jump" = player_anim_jump,
+				"jump_fall_inbetween" = player_anim_jump_fall_inbetween,
+				"fall" = player_anim_fall,
+				"run" = player_anim_run,
+				"attack" = player_anim_attack,
+				"dash" = player_anim_dash,
+			},
+			current_anim_name = "idle",
+		},
+	)
+
+	if pos, ok := gs.level.player_spawn.?; ok {
+		gs.safe_position = pos
+	}
+}
+
+level_from_id :: proc(levels: []Level, id: u32) -> ^Level {
+	for &l in levels {
+		if l.id == id {
+			return &l
+		}
+	}
+	return nil
 }
 
 gs: Game_State
@@ -175,94 +362,6 @@ main :: proc() {
 
 game_init :: proc(gs: ^Game_State) {
 	gs.player_texture = rl.LoadTexture("assets/textures/player_120x80.png")
-
-	player_anim_idle := Animation {
-		size   = {120, 80},
-		offset = {52, 42},
-		start  = 0,
-		end    = 9,
-		row    = 0,
-		time   = 0.15,
-		flags  = {.Loop},
-	}
-
-	player_anim_jump := Animation {
-		size   = {120, 80},
-		offset = {52, 42},
-		start  = 0,
-		end    = 2,
-		row    = 1,
-		time   = 0.15,
-	}
-
-	player_anim_jump_fall_inbetween := Animation {
-		size   = {120, 80},
-		offset = {52, 42},
-		start  = 3,
-		end    = 4,
-		row    = 1,
-		time   = 0.15,
-	}
-
-	player_anim_fall := Animation {
-		size   = {120, 80},
-		offset = {52, 42},
-		start  = 5,
-		end    = 7,
-		row    = 1,
-		time   = 0.15,
-		flags  = {.Loop},
-	}
-
-	player_anim_run := Animation {
-		size   = {120, 80},
-		offset = {52, 42},
-		start  = 0,
-		end    = 9,
-		row    = 2,
-		time   = 0.15,
-		flags  = {.Loop},
-	}
-
-	player_anim_attack := Animation {
-		size         = {120, 80},
-		offset       = {52, 42},
-		start        = 0,
-		end          = 3,
-		row          = 3,
-		time         = 0.15,
-		on_finish    = player_on_finish_attack,
-		timed_events = {{timer = 0.15, duration = 0.15, callback = player_attack_callback}},
-	}
-
-	gs.level = &gs.level_definitions["BINARY_TEST"]
-
-	spawn := gs.level.player_spawn.? or_else Vec2{100, 100}
-	gs.player_id = entity_create(
-		{
-			x = spawn.x,
-			y = spawn.y,
-			width = 16,
-			height = 38,
-			move_speed = 280,
-			jump_force = 650,
-			on_enter = player_on_enter,
-			health = 5,
-			max_health = 5,
-			texture = &gs.player_texture,
-			animations = {
-				"idle" = player_anim_idle,
-				"jump" = player_anim_jump,
-				"jump_fall_inbetween" = player_anim_jump_fall_inbetween,
-				"fall" = player_anim_fall,
-				"run" = player_anim_run,
-				"attack" = player_anim_attack,
-			},
-			current_anim_name = "idle",
-			animation_timer = 0.15,
-		},
-	)
-
 	gs.scene = .Game
 }
 
@@ -283,28 +382,28 @@ game_update :: proc(gs: ^Game_State) {
 
 			player_update(gs, dt)
 			entity_update(gs, dt)
-			physics_update(gs.entities[:], gs.level.colliders[:], dt)
-			behavior_update(gs.entities[:], gs.level.colliders[:], dt)
+			physics_update(gs.entities[:], gs.colliders[:], dt)
+			behavior_update(gs.entities[:], gs.colliders[:], dt)
 
 			{
 				render_half_size := Vec2{RENDER_WIDTH, RENDER_HEIGHT} / 2
 
 				gs.camera.target = {player.x, player.y} - render_half_size
 
-				if gs.camera.target.x < gs.level.level_min.x {
-					gs.camera.target.x = gs.level.level_min.x
+				if gs.camera.target.x < gs.level.pos.x {
+					gs.camera.target.x = gs.level.pos.x
 				}
 
-				if gs.camera.target.y < gs.level.level_min.y {
-					gs.camera.target.y = gs.level.level_min.y
+				if gs.camera.target.y < gs.level.pos.y {
+					gs.camera.target.y = gs.level.pos.y
 				}
 
-				if gs.camera.target.x + RENDER_WIDTH > gs.level.level_max.x {
-					gs.camera.target.x = gs.level.level_max.x - RENDER_WIDTH
+				if gs.camera.target.x + RENDER_WIDTH > gs.level.pos.x + gs.level.size.x {
+					gs.camera.target.x = gs.level.pos.x + gs.level.size.x - RENDER_WIDTH
 				}
 
-				if gs.camera.target.y + RENDER_HEIGHT > gs.level.level_max.y {
-					gs.camera.target.y = gs.level.level_max.y - RENDER_HEIGHT
+				if gs.camera.target.y + RENDER_HEIGHT > gs.level.pos.y + gs.level.size.y {
+					gs.camera.target.y = gs.level.pos.y + gs.level.size.y - RENDER_HEIGHT
 				}
 			}
 
@@ -328,14 +427,10 @@ game_update :: proc(gs: ^Game_State) {
 						}
 					}
 
-					_, hit_ground_left := raycast(
-						pos + {0, size.y},
-						DOWN * 2,
-						gs.level.colliders[:],
-					)
+					_, hit_ground_left := raycast(pos + {0, size.y}, DOWN * 2, gs.colliders[:])
 					if !hit_ground_left do break safety_check
 
-					_, hit_ground_right := raycast(pos + size, DOWN * 2, gs.level.colliders[:])
+					_, hit_ground_right := raycast(pos + size, DOWN * 2, gs.colliders[:])
 					if !hit_ground_right do break safety_check
 
 					_, hit_entity_left := raycast(pos, LEFT * TILE_SIZE, targets[:])
@@ -357,7 +452,7 @@ game_update :: proc(gs: ^Game_State) {
 		rl.BeginMode2D(gs.camera)
 		rl.ClearBackground(BG_COLOR)
 
-		for rect in gs.level.colliders {
+		for rect in gs.colliders {
 			rl.DrawRectangleRec(rect, rl.WHITE)
 			rl.DrawRectangleLinesEx(rect, 1, rl.GRAY)
 		}
@@ -449,6 +544,7 @@ main_menu_update :: proc(gs: ^Game_State) {
 
 		if main_menu_item_draw("New Game", center + {0, 60}) {
 			game_init(gs)
+			level_load(gs, FIRST_LEVEL_ID)
 			return
 		}
 
@@ -486,7 +582,7 @@ main_menu_item_draw :: proc(
 	return
 }
 
-combine_level_colliders :: proc(solid_tiles: []Rect, l: ^Level) {
+combine_colliders :: proc(world_pos: Vec2, solid_tiles: []Rect, colliders: ^[dynamic]Rect) {
 	wide_rect := solid_tiles[0]
 	wide_rects := make([dynamic]Rect, context.temp_allocator)
 
@@ -518,23 +614,31 @@ combine_level_colliders :: proc(solid_tiles: []Rect, l: ^Level) {
 		   big_rect.y + big_rect.height == rect.y {
 			big_rect.height += TILE_SIZE
 		} else {
-			big_rect.x += l.level_min.x
-			big_rect.y += l.level_min.y
-			append(&l.colliders, big_rect)
+			big_rect.x += world_pos.x
+			big_rect.y += world_pos.y
+			append(colliders, big_rect)
 			big_rect = rect
 		}
 	}
 
-	big_rect.x += l.level_min.x
-	big_rect.y += l.level_min.y
-	append(&l.colliders, big_rect)
+	big_rect.x += world_pos.x
+	big_rect.y += world_pos.y
+	append(colliders, big_rect)
+}
+
+recreate_colliders :: proc(world_pos: Vec2, colliders: ^[dynamic]Rect, tiles: []Tile) {
+	clear(colliders)
+
+	solid_tiles := make([dynamic]Rect, context.temp_allocator)
+	for t in tiles {
+		append(&solid_tiles, Rect{t.pos.x, t.pos.y, TILE_SIZE, TILE_SIZE})
+	}
+
+	if len(solid_tiles) > 0 {
+		combine_colliders(world_pos, solid_tiles[:], colliders)
+	}
 }
 
 recreate_level_colliders :: proc(l: ^Level) {
-	clear(&l.colliders)
-	solid_tiles := make([dynamic]Rect, context.temp_allocator)
-	for t in l.tiles {
-		append(&solid_tiles, Rect{t.pos.x, t.pos.y, TILE_SIZE, TILE_SIZE})
-	}
-	combine_level_colliders(solid_tiles[:], l)
+	recreate_colliders(l.pos, &gs.colliders, l.tiles[:])
 }
