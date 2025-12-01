@@ -21,6 +21,8 @@ World_Data_Tileset_Header :: struct {}
 World_Data_Level_Header :: struct {
 	magic:  u32,
 	id:     u32,
+	x:      u32,
+	y:      u32,
 	width:  u32,
 	height: u32,
 }
@@ -92,6 +94,7 @@ world_data_load :: proc() {
 		assert(level_header.magic == LEVEL_MAGIC)
 
 		level.id = level_header.id
+		level.pos = Vec2{f32(level_header.x), f32(level_header.y)} * TILE_SIZE
 		level.size = Vec2{f32(level_header.width), f32(level_header.height)} * TILE_SIZE
 
 		solid_tiles := make([dynamic]Rect, context.temp_allocator)
@@ -108,7 +111,7 @@ world_data_load :: proc() {
 			}
 		}
 
-		combine_colliders({0, 0}, solid_tiles[:], &gs.colliders)
+		combine_colliders(level.pos, solid_tiles[:], &gs.colliders)
 
 		level.player_spawn = Vec2{100, 100}
 		append(&gs.levels, level)

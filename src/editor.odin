@@ -1,8 +1,11 @@
 package main
 
 import "core:fmt"
+import "core:log"
 import "core:math"
 import "core:math/linalg"
+import "core:mem"
+import "core:mem/virtual"
 import "core:slice"
 import "core:strings"
 import rl "vendor:raylib"
@@ -38,17 +41,62 @@ Resize_Cursor := [Dir8]rl.MouseCursor {
 }
 
 Editor_State :: struct {
-	tool:             Editor_Tool,
-	previous_tool:    Editor_Tool,
-	area_begin:       Vec2i,
-	area_end:         Vec2i,
-	resize_level_dir: Dir8,
-	resize_rect:      Rect,
-	resize_start_pos: Vec2,
+	tool:              Editor_Tool,
+	previous_tool:     Editor_Tool,
+	area_begin:        Vec2i,
+	area_end:          Vec2i,
+	resize_level_dir:  Dir8,
+	resize_rect:       Rect,
+	resize_start_pos:  Vec2,
+	cmd_arena:         virtual.Arena,
+	cmd_allocator:     mem.Allocator,
+	command_history:   [dynamic]Cmd_Entry,
+	undo_count:        int,
+	spike_orientation: Direction,
+}
+
+Cmd :: union {
+	Cmd_Tiles_Insert,
+	Cmd_Tiles_Remove,
+	Cmd_Spikes_Insert,
+	Cmd_Spikes_Remove,
+}
+
+Cmd_Tiles_Insert :: struct {
+	coords:         []Vec2i,
+	spikes_removed: []Spike,
+}
+
+Cmd_Tiles_Remove :: struct {
+	coords:         []Vec2i,
+	spikes_removed: []Spike,
+}
+
+Cmd_Spikes_Insert :: struct {
+	spikes:        []Spike,
+	tiles_removed: []Vec2i,
+}
+
+Cmd_Spikes_Remove :: struct {
+	spikes:        []Spike,
+	tiles_removed: []Vec2i,
+}
+
+Cmd_Entry :: struct {
+	forward: Cmd,
+	inverse: Cmd,
 }
 
 @(private = "file")
 es: Editor_State
+
+editor_init :: proc() {
+	if err := virtual.arena_init_growing(&es.cmd_arena); err != nil {
+		log.panicf("Failed to init editor arena: %s\n", err)
+	}
+	es.cmd_allocator = virtual.arena_allocator(&es.cmd_arena)
+	es.command_history = make([dynamic]Cmd_Entry, es.cmd_allocator)
+}
 
 calculate_resize :: proc(
 	level: ^Level,
@@ -168,7 +216,9 @@ calculate_resize_rect :: proc(level_rect: Rect, dir: Dir8) -> Rect {
 	return result
 }
 
-editor_update :: proc(gs: ^Game_State) {
+editor_update :: proc(gs: ^Game_State, dt: f32) {
+	context.allocator = es.cmd_allocator
+
 	mouse_pos := rl.GetMousePosition()
 
 	rl.SetMouseCursor(.DEFAULT)
@@ -205,14 +255,50 @@ editor_update :: proc(gs: ^Game_State) {
 			es.tool = .Spike
 		}
 
+		if rl.IsKeyPressed(.F) {
+			es.spike_orientation += Direction(1)
+			if int(es.spike_orientation) > 3 {
+				es.spike_orientation = Direction(0)
+			}
+		}
+
+		if rl.IsKeyPressed(.Z) && (rl.IsKeyDown(.LEFT_CONTROL) || rl.IsKeyDown(.RIGHT_CONTROL)) {
+			editor_undo()
+		}
+
+		if rl.IsKeyPressed(.Y) && (rl.IsKeyDown(.LEFT_CONTROL) || rl.IsKeyDown(.RIGHT_CONTROL)) {
+			editor_redo()
+		}
+
 		es.previous_tool = es.tool
 		if gs.camera.zoom < 1 {
 			es.tool = .Level
 		}
 	}
 
-	if rl.IsMouseButtonDown(.MIDDLE) {
-		mouse_delta := rl.GetMouseDelta()
+	{
+		mouse_delta: Vec2
+
+		if rl.IsKeyDown(.LEFT) {
+			mouse_delta.x += 300 * dt
+		}
+
+		if rl.IsKeyDown(.RIGHT) {
+			mouse_delta.x -= 300 * dt
+		}
+
+		if rl.IsKeyDown(.UP) {
+			mouse_delta.y += 300 * dt
+		}
+
+		if rl.IsKeyDown(.DOWN) {
+			mouse_delta.y -= 300 * dt
+		}
+
+		if rl.IsMouseButtonDown(.MIDDLE) {
+			mouse_delta = rl.GetMouseDelta()
+		}
+
 		gs.camera.target -= mouse_delta / gs.camera.zoom
 	}
 
@@ -234,25 +320,10 @@ editor_update :: proc(gs: ^Game_State) {
 		place := rl.IsMouseButtonReleased(.LEFT)
 		remove := rl.IsMouseButtonReleased(.RIGHT)
 
-		if place || remove {
-			es.area_end = coords
-			diff := es.area_end - es.area_begin
-			area := linalg.abs(diff)
-			diff_f32 := Vec2{f32(diff.x), f32(diff.y)}
-			sign := Vec2i{i32(linalg.sign(diff_f32.x)), i32(linalg.sign(diff_f32.y))}
-
-			for y in 0 ..= area.y {
-				for x in 0 ..= area.x {
-					rel_coords := es.area_begin + {i32(x), i32(y)} * sign
-					rel_coords -= coords_from_pos(gs.level.pos)
-
-					if place {
-						editor_place_tile(rel_coords, gs.level)
-					} else {
-						editor_remove_tile(rel_coords, gs.level)
-					}
-				}
-			}
+		if place {
+			editor_command_dispatch(Cmd_Tiles_Insert)
+		} else if remove {
+			editor_command_dispatch(Cmd_Tiles_Remove)
 		}
 	case .Spike:
 		if rl.IsMouseButtonPressed(.LEFT) || rl.IsMouseButtonPressed(.RIGHT) {
@@ -260,30 +331,23 @@ editor_update :: proc(gs: ^Game_State) {
 			es.area_end = coords
 		}
 
-		if rl.IsMouseButtonDown(.LEFT) || rl.IsMouseButtonDown(.RIGHT) {
-			rect := rect_from_coords_any_orientation(es.area_begin, coords)
-			if rect.width > rect.height {
+		if rl.IsMouseButtonDown(.LEFT) {
+			switch es.spike_orientation {
+			case .Up, .Down:
 				es.area_end.x = coords.x
-				es.area_end.y = es.area_begin.y
-			}
-			if rect.height > rect.width {
-				es.area_end.x = es.area_begin.x
+			case .Left, .Right:
 				es.area_end.y = coords.y
 			}
+		} else if rl.IsMouseButtonDown(.RIGHT) {
+			es.area_end = coords
 		}
 
 		if rl.IsMouseButtonReleased(.LEFT) {
-			begin := es.area_begin - coords_from_pos(gs.level.pos)
-			end := es.area_end - coords_from_pos(gs.level.pos)
-			rect := rect_from_coords_any_orientation(begin, end)
-			editor_place_spikes(rect, gs.level)
+			editor_command_dispatch(Cmd_Spikes_Insert)
 		}
 
 		if rl.IsMouseButtonReleased(.RIGHT) {
-			begin := es.area_begin - coords_from_pos(gs.level.pos)
-			end := es.area_end - coords_from_pos(gs.level.pos)
-			rect := rect_from_coords_any_orientation(begin, end)
-			editor_remove_spikes(rect, gs.level)
+			editor_command_dispatch(Cmd_Spikes_Remove)
 		}
 	case .Level:
 		if rl.IsMouseButtonPressed(.LEFT) || rl.IsMouseButtonPressed(.RIGHT) {
@@ -356,8 +420,11 @@ editor_draw :: proc(gs: ^Game_State) {
 	rl.DrawTextEx(
 		gs.font_48,
 		fmt.ctprintf(
-			"Tool: %s\nCamera.Zoom: %v\nCamera.Target: %v",
+			"Tool: %s\nHistory: %d/%d\nOrientation: %v\nCamera.Zoom: %v\nCamera.Target: %v", // changed
 			es.tool,
+			len(es.command_history) - es.undo_count, // new
+			len(es.command_history), // new
+			es.spike_orientation, // new
 			gs.camera.zoom,
 			gs.camera.target,
 		),
@@ -465,72 +532,47 @@ is_spike_at :: proc {
 	is_spike_at_coords,
 }
 
-editor_place_tile :: proc(coords: Vec2i, l: ^Level) {
+editor_tile_insert :: proc(coords: Vec2i, l: ^Level) {
 	if !is_tile_at(coords, l) {
 		append(&l.tiles, Tile{pos = pos_from_coords(coords)})
-		slice.sort_by(l.tiles[:], proc(a, b: Tile) -> bool {
-			if a.pos.y != b.pos.y do return a.pos.y < b.pos.y
-			return a.pos.x < b.pos.x
-		})
-
-		rect := rect_from_pos_size(pos_from_coords(coords) - l.pos, TILE_SIZE)
-		editor_remove_spikes(rect, l)
 
 		recreate_colliders(l.pos, &gs.colliders, l.tiles[:])
 	}
 }
 
-try_remove_tile_at :: proc(coords: Vec2i, l: ^Level) -> bool {
-	for tile, index in l.tiles {
+editor_tile_index :: proc(coords: Vec2i, l: ^Level) -> (index: int, ok: bool) {
+	for tile, i in l.tiles {
 		if coords_from_pos(tile.pos) == coords {
-			ordered_remove(&l.tiles, index)
-			return true
+			return i, true
 		}
 	}
-	return false
+	return -1, false
 }
 
-editor_remove_tile :: proc(coords: Vec2i, l: ^Level) {
-	if try_remove_tile_at(coords, l) {
-		slice.sort_by(l.tiles[:], proc(a, b: Tile) -> bool {
-			if a.pos.y != b.pos.y do return a.pos.y < b.pos.y
-			return a.pos.x < b.pos.x
-		})
-
+editor_tile_remove :: proc(coords: Vec2i, l: ^Level) {
+	if index, ok := editor_tile_index(coords, l); ok {
+		ordered_remove(&l.tiles, index)
 		recreate_colliders(l.pos, &gs.colliders, l.tiles[:])
 	}
 }
 
-editor_place_spikes :: proc(rect: Rect, l: ^Level) {
-	coords := coords_from_pos({rect.x, rect.y})
-	cols := int(rect.width) / TILE_SIZE
-	rows := int(rect.height) / TILE_SIZE
+editor_spike_insert :: proc(spike: Spike, l: ^Level) {
+	append(&l.spikes, spike)
+}
 
-	for y in 0 ..< rows {
-		for x in 0 ..< cols {
-			editor_remove_tile(coords + {i32(x), i32(y)}, l)
+editor_spike_index :: proc(coords: Vec2i, l: ^Level) -> (index: int, ok: bool) {
+	for spike, i in l.spikes {
+		pos := Vec2{spike.collider.x, spike.collider.y}
+		if coords_from_pos(pos) == coords {
+			return i, true
 		}
 	}
+	return -1, false
+}
 
-	editor_remove_spikes(rect, l)
-
-	spike: Spike
-	spike.collider = rect
-	if facing, ok := determine_spike_facing(rect, l); ok {
-		spike.facing = facing
-		switch facing {
-		case .Up:
-			spike.collider.y += SPIKE_DIFF
-			spike.collider.height = SPIKE_DEPTH
-		case .Right:
-			spike.collider.width = SPIKE_DEPTH
-		case .Down:
-			spike.collider.height = SPIKE_DEPTH
-		case .Left:
-			spike.collider.width = SPIKE_DEPTH
-			spike.collider.x += SPIKE_DIFF
-		}
-		append(&l.spikes, spike)
+editor_spike_remove :: proc(spike: Spike, l: ^Level) {
+	if index, ok := slice.linear_search(l.spikes[:], spike); ok {
+		unordered_remove(&l.spikes, index)
 	}
 }
 
@@ -543,40 +585,6 @@ is_area_tiled :: proc(begin: Vec2i, end: Vec2i, l: ^Level) -> bool {
 		}
 	}
 	return true
-}
-
-determine_spike_facing :: proc(rect: Rect, l: ^Level) -> (facing: Direction, ok: bool) {
-	begin_coords := coords_from_pos({rect.x, rect.y})
-	end_coords := coords_from_pos({rect.x + rect.width, rect.y + rect.height})
-
-	// Check Below, Facing Up
-	if is_area_tiled(begin_coords + {0, 1}, end_coords + {0, 1}, l) {
-		return .Up, true
-	}
-
-	// Check Above, Facing Down
-	if is_area_tiled(begin_coords + {0, -1}, end_coords + {0, -1}, l) {
-		return .Down, true
-	}
-	// Check Right, Facing Left
-	if is_area_tiled(begin_coords + {1, 0}, end_coords + {1, 0}, l) {
-		return .Left, true
-	}
-
-	// Check Left, Facing Right
-	if is_area_tiled(begin_coords + {-1, 0}, end_coords + {-1, 0}, l) {
-		return .Right, true
-	}
-
-	return .Up, false
-}
-
-editor_remove_spikes :: proc(rect: Rect, l: ^Level) {
-	#reverse for spike, i in l.spikes {
-		if rl.CheckCollisionRecs(rect, spike.collider) {
-			ordered_remove(&l.spikes, i)
-		}
-	}
 }
 
 editor_place_level :: proc(gs: ^Game_State, rect: Rect) {
@@ -630,4 +638,253 @@ get_next_level_id :: proc(levels: []Level) -> u32 {
 		}
 	}
 	return id + 1
+}
+
+editor_command_construct :: proc(cmd_type: typeid) -> (cmd: Cmd_Entry, ok: bool) {
+	switch cmd_type {
+	case Cmd_Tiles_Insert:
+		area_coords := coords_from_area(es.area_begin, es.area_end)
+
+		// No tiles inside level bounds
+		if len(area_coords) == 0 {
+			return
+		}
+
+		spikes := spikes_from_area(es.area_begin, es.area_end, gs.level)
+
+		forward := Cmd_Tiles_Insert {
+			coords         = area_coords,
+			spikes_removed = spikes,
+		}
+
+		air := make([dynamic]Vec2i)
+
+		for coords in area_coords {
+			if !is_tile_at(coords, gs.level) {
+				append(&air, coords)
+			}
+		}
+
+		inverse := Cmd_Tiles_Remove {
+			coords         = air[:],
+			spikes_removed = spikes,
+		}
+
+		return {forward, inverse}, true
+	case Cmd_Tiles_Remove:
+		area_coords := coords_from_area(es.area_begin, es.area_end)
+
+		forward := Cmd_Tiles_Remove {
+			coords = area_coords,
+		}
+
+		solid := make([dynamic]Vec2i)
+
+		for coords in area_coords {
+			if is_tile_at(coords, gs.level) {
+				append(&solid, coords)
+			}
+		}
+
+		// No tiles removed
+		if len(solid) == 0 {
+			return
+		}
+
+		spikes := spikes_from_area(es.area_begin, es.area_end, gs.level)
+
+		inverse := Cmd_Tiles_Insert {
+			coords         = solid[:],
+			spikes_removed = spikes,
+		}
+
+		return {forward, inverse}, true
+	case Cmd_Spikes_Insert:
+		rect := rect_from_coords_any_orientation(es.area_begin, es.area_end)
+		rect = rect_pos_add(rect, -gs.level.pos)
+		overlap := rl.GetCollisionRec(rect, rect_from_pos_size(0, gs.level.size))
+
+		// Outside level, do nothing
+		if overlap != rect {
+			return
+		}
+
+		// Overlapping other spikes, do nothing
+		for spike in gs.level.spikes {
+			if rl.CheckCollisionRecs(spike.collider, rect) {
+				return
+			}
+		}
+
+		spike := Spike {
+			collider = rect,
+			facing   = es.spike_orientation,
+		}
+
+		switch spike.facing {
+		case .Up:
+			spike.collider.y += SPIKE_DIFF
+			spike.collider.height = SPIKE_DEPTH
+		case .Right:
+			spike.collider.width = SPIKE_DEPTH
+		case .Down:
+			spike.collider.height = SPIKE_DEPTH
+		case .Left:
+			spike.collider.width = SPIKE_DEPTH
+			spike.collider.x += SPIKE_DIFF
+		}
+
+		area_coords := coords_from_area(es.area_begin, es.area_end)
+
+		tiles_removed := make([dynamic]Vec2i)
+
+		for coords in area_coords {
+			if is_tile_at(coords, gs.level) {
+				append(&tiles_removed, coords)
+			}
+		}
+
+		spikes := make([]Spike, 1)
+		spikes[0] = spike
+		forward := Cmd_Spikes_Insert {
+			spikes        = spikes,
+			tiles_removed = tiles_removed[:],
+		}
+
+		inverse := Cmd_Spikes_Remove {
+			spikes        = spikes,
+			tiles_removed = tiles_removed[:],
+		}
+
+		return {forward, inverse}, true
+	case Cmd_Spikes_Remove:
+		spikes := spikes_from_area(es.area_begin, es.area_end, gs.level)
+
+		if len(spikes) == 0 do return
+
+		forward := Cmd_Spikes_Remove {
+			spikes = spikes,
+		}
+
+		inverse := Cmd_Spikes_Insert {
+			spikes = spikes,
+		}
+
+		return {forward, inverse}, true
+	}
+
+
+	panic("Should not reach this location, check switch statement")
+}
+
+editor_command_execute :: proc(cmd: Cmd) {
+	switch v in cmd {
+	case Cmd_Tiles_Insert:
+		for coords in v.coords {
+			editor_tile_insert(coords, gs.level)
+		}
+
+		for spike in v.spikes_removed {
+			editor_spike_remove(spike, gs.level)
+		}
+	case Cmd_Tiles_Remove:
+		for coords in v.coords {
+			editor_tile_remove(coords, gs.level)
+		}
+
+		for spike in v.spikes_removed {
+			editor_spike_insert(spike, gs.level)
+		}
+	case Cmd_Spikes_Insert:
+		for spike in v.spikes {
+			editor_spike_insert(spike, gs.level)
+		}
+
+		for coords in v.tiles_removed {
+			editor_tile_remove(coords, gs.level)
+		}
+	case Cmd_Spikes_Remove:
+		for spike in v.spikes {
+			editor_spike_remove(spike, gs.level)
+		}
+
+		for coords in v.tiles_removed {
+			editor_tile_insert(coords, gs.level)
+		}
+	}
+}
+
+editor_command_record :: proc(cmd: Cmd_Entry) {
+	next_index := len(es.command_history) - es.undo_count
+	resize(&es.command_history, next_index + 1)
+
+	es.command_history[next_index] = cmd
+	es.undo_count = 0
+}
+
+editor_command_dispatch :: proc(cmd_type: typeid) {
+	if cmd, ok := editor_command_construct(cmd_type); ok {
+		editor_command_execute(cmd.forward)
+		editor_command_record(cmd)
+	}
+}
+
+editor_undo :: proc() {
+	commands_exist := len(es.command_history) > 0
+	can_undo_more := len(es.command_history) != es.undo_count
+
+	if commands_exist && can_undo_more {
+		es.undo_count += 1
+		undo_cmd := es.command_history[len(es.command_history) - es.undo_count]
+		editor_command_execute(undo_cmd.inverse)
+	}
+}
+
+editor_redo :: proc() {
+	did_undo := es.undo_count > 0
+	can_redo_more := len(es.command_history) - es.undo_count >= 0
+
+	if did_undo && can_redo_more {
+		redo_cmd := es.command_history[len(es.command_history) - es.undo_count]
+		es.undo_count -= 1
+		editor_command_execute(redo_cmd.forward)
+	}
+}
+
+coords_from_area :: proc(begin, end: Vec2i) -> []Vec2i {
+	coords := make([dynamic]Vec2i)
+
+	area_min := Vec2i{min(begin.x, end.x), min(begin.y, end.y)}
+	area_max := Vec2i{max(begin.x, end.x), max(begin.y, end.y)}
+
+	level_min := coords_from_pos(gs.level.pos)
+	level_max := coords_from_pos(gs.level.pos + gs.level.size)
+
+	area_min.x = max(area_min.x, level_min.x)
+	area_min.y = max(area_min.y, level_min.y)
+	area_max.x = min(area_max.x, level_max.x - 1)
+	area_max.y = min(area_max.y, level_max.y - 1)
+
+	for y := area_min.y; y <= area_max.y; y += 1 {
+		for x := area_min.x; x <= area_max.x; x += 1 {
+			append(&coords, Vec2i{i32(x), i32(y)})
+		}
+	}
+
+	return coords[:]
+}
+
+spikes_from_area :: proc(p, q: Vec2i, l: ^Level) -> []Spike {
+	rect := rect_from_coords_any_orientation(p, q)
+	rect = rect_pos_add(rect, -l.pos)
+
+	spikes := make([dynamic]Spike)
+
+	for spike in l.spikes {
+		if rl.CheckCollisionRecs(rect, spike.collider) {
+			append(&spikes, spike)
+		}
+	}
+
+	return spikes[:]
 }

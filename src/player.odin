@@ -66,7 +66,7 @@ player_update :: proc(gs: ^Game_State, dt: f32) {
 
 	// Spike collision - reset to safe position
 	for spike in gs.level.spikes {
-		if rl.CheckCollisionRecs(spike.collider, player.collider) {
+		if rl.CheckCollisionRecs(rect_pos_add(spike.collider, gs.level.pos), player.collider) {
 			player.x = gs.safe_position.x
 			player.y = gs.safe_position.y
 			player.vel = 0

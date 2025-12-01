@@ -335,30 +335,7 @@ level_from_id :: proc(levels: []Level, id: u32) -> ^Level {
 	return nil
 }
 
-gs: Game_State
-
-main :: proc() {
-	rl.InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "simple test")
-	rl.SetTargetFPS(60)
-
-	world_data_load()
-
-	gs.font_48 = rl.LoadFontEx("assets/fonts/Gogh-ExtraBold.ttf", 48, nil, 256)
-	gs.font_64 = rl.LoadFontEx("assets/fonts/Gogh-ExtraBold.ttf", 64, nil, 256)
-
-	gs.camera = rl.Camera2D {
-		zoom = ZOOM,
-	}
-
-	for !rl.WindowShouldClose() {
-		switch gs.scene {
-		case .Main_Menu:
-			main_menu_update(&gs)
-		case .Game:
-			game_update(&gs)
-		}
-	}
-}
+gs: ^Game_State
 
 game_init :: proc(gs: ^Game_State) {
 	gs.player_texture = rl.LoadTexture("assets/textures/player_120x80.png")
@@ -377,7 +354,7 @@ game_update :: proc(gs: ^Game_State) {
 		player := entity_get(gs.player_id)
 
 		if gs.editor_enabled {
-			editor_update(gs)
+			editor_update(gs, dt)
 		} else {
 
 			player_update(gs, dt)
@@ -422,7 +399,7 @@ game_update :: proc(gs: ^Game_State) {
 
 				safety_check: {
 					for spike in gs.level.spikes {
-						if rl.CheckCollisionRecs(spike.collider, player.collider) {
+						if rl.CheckCollisionRecs(rect_pos_add(spike.collider, gs.level.pos), player.collider) {
 							break safety_check
 						}
 					}
@@ -458,7 +435,7 @@ game_update :: proc(gs: ^Game_State) {
 		}
 
 		for spike in gs.level.spikes {
-			rl.DrawRectangleLinesEx(spike.collider, 1, rl.YELLOW)
+			rl.DrawRectangleLinesEx(rect_pos_add(spike.collider, gs.level.pos), 1, rl.YELLOW)
 		}
 
 		for &e in gs.entities {
@@ -582,6 +559,26 @@ main_menu_item_draw :: proc(
 	return
 }
 
+recreate_colliders :: proc(world_pos: Vec2, colliders: ^[dynamic]Rect, tiles: []Tile) {
+	clear(colliders)
+	slice.sort_by(tiles, proc(a, b: Tile) -> bool {
+		if a.pos.y != b.pos.y do return a.pos.y < b.pos.y
+		return a.pos.x < b.pos.x
+	})
+
+	solid_tiles := make([dynamic]Rect, context.temp_allocator)
+	for t in tiles {
+		append(
+			&solid_tiles,
+			Rect{t.pos.x - world_pos.x, t.pos.y - world_pos.y, TILE_SIZE, TILE_SIZE}, // Fix: subtract world_pos from collider position
+		)
+	}
+
+	if len(solid_tiles) > 0 {
+		combine_colliders(world_pos, solid_tiles[:], colliders)
+	}
+}
+
 combine_colliders :: proc(world_pos: Vec2, solid_tiles: []Rect, colliders: ^[dynamic]Rect) {
 	wide_rect := solid_tiles[0]
 	wide_rects := make([dynamic]Rect, context.temp_allocator)
@@ -626,19 +623,30 @@ combine_colliders :: proc(world_pos: Vec2, solid_tiles: []Rect, colliders: ^[dyn
 	append(colliders, big_rect)
 }
 
-recreate_colliders :: proc(world_pos: Vec2, colliders: ^[dynamic]Rect, tiles: []Tile) {
-	clear(colliders)
+main :: proc() {
+	world_data_save()
 
-	solid_tiles := make([dynamic]Rect, context.temp_allocator)
-	for t in tiles {
-		append(&solid_tiles, Rect{t.pos.x, t.pos.y, TILE_SIZE, TILE_SIZE})
+	gs = new(Game_State)
+	editor_init()
+
+	rl.InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "simple test")
+	rl.SetTargetFPS(60)
+
+	world_data_load()
+
+	gs.font_48 = rl.LoadFontEx("assets/fonts/Gogh-ExtraBold.ttf", 48, nil, 256)
+	gs.font_64 = rl.LoadFontEx("assets/fonts/Gogh-ExtraBold.ttf", 64, nil, 256)
+
+	gs.camera = rl.Camera2D {
+		zoom = ZOOM,
 	}
 
-	if len(solid_tiles) > 0 {
-		combine_colliders(world_pos, solid_tiles[:], colliders)
+	for !rl.WindowShouldClose() {
+		switch gs.scene {
+		case .Main_Menu:
+			main_menu_update(gs)
+		case .Game:
+			game_update(gs)
+		}
 	}
-}
-
-recreate_level_colliders :: proc(l: ^Level) {
-	recreate_colliders(l.pos, &gs.colliders, l.tiles[:])
 }
