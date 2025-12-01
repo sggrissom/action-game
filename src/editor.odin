@@ -53,6 +53,7 @@ Editor_State :: struct {
 	command_history:   [dynamic]Cmd_Entry,
 	undo_count:        int,
 	spike_orientation: Direction,
+	tileset:           Tileset,
 }
 
 Cmd :: union {
@@ -87,6 +88,46 @@ Cmd_Entry :: struct {
 	inverse: Cmd,
 }
 
+// Dir8 -> Vec2i mapping
+Dir8_Coords := [Dir8]Vec2i {
+	.NE = Vec2i{1, -1},
+	.SE = Vec2i{1, 1},
+	.SW = Vec2i{-1, 1},
+	.NW = Vec2i{-1, -1},
+	.N  = Vec2i{0, -1},
+	.E  = Vec2i{1, 0},
+	.S  = Vec2i{0, 1},
+	.W  = Vec2i{-1, 0},
+}
+
+Tile_Neighbors :: bit_set[Dir8]
+TILE_NEIGHBORS_ALL: Tile_Neighbors : {.N, .E, .S, .W, .NE, .SE, .SW, .NW}
+
+Tile_Flip :: enum {
+	None,
+	X,
+	Y,
+	Both,
+}
+
+Rule_Flags :: enum {
+	Match_Exact,
+	Terminate,
+}
+
+Tileset_Rule :: struct {
+	src:           Vec2,
+	neighbors:     Tile_Neighbors,
+	not_neighbors: Tile_Neighbors,
+	flip:          Tile_Flip,
+	flags:         bit_set[Rule_Flags],
+}
+
+Tileset :: struct {
+	texture: rl.Texture2D,
+	rules:   []Tileset_Rule,
+}
+
 @(private = "file")
 es: Editor_State
 
@@ -96,6 +137,7 @@ editor_init :: proc() {
 	}
 	es.cmd_allocator = virtual.arena_allocator(&es.cmd_arena)
 	es.command_history = make([dynamic]Cmd_Entry, es.cmd_allocator)
+	es.tileset = make_tileset()
 }
 
 calculate_resize :: proc(
@@ -493,6 +535,21 @@ editor_draw :: proc(gs: ^Game_State) {
 	}
 
 	rl.DrawRectangleRec(es.resize_rect, rl.YELLOW)
+
+	coords := coords_from_pos(rl.GetScreenToWorld2D(rl.GetMousePosition(), gs.camera))
+
+	rl.BeginMode2D(gs.camera)
+
+	for dir in Dir8_Coords {
+		pos := pos_from_coords(coords + dir)
+		if is_tile_at(coords + dir, gs.level) {
+			rl.DrawRectangleV(pos, 16, {0, 200, 0, 128})
+		} else {
+			rl.DrawRectangleV(pos, 16, {200, 0, 0, 128})
+		}
+	}
+
+	rl.EndMode2D()
 }
 
 is_tile_at_pos :: proc(pos: Vec2, l: ^Level) -> bool {
@@ -535,8 +592,6 @@ is_spike_at :: proc {
 editor_tile_insert :: proc(coords: Vec2i, l: ^Level) {
 	if !is_tile_at(coords, l) {
 		append(&l.tiles, Tile{pos = pos_from_coords(coords)})
-
-		recreate_colliders(l.pos, &gs.colliders, l.tiles[:])
 	}
 }
 
@@ -552,7 +607,6 @@ editor_tile_index :: proc(coords: Vec2i, l: ^Level) -> (index: int, ok: bool) {
 editor_tile_remove :: proc(coords: Vec2i, l: ^Level) {
 	if index, ok := editor_tile_index(coords, l); ok {
 		ordered_remove(&l.tiles, index)
-		recreate_colliders(l.pos, &gs.colliders, l.tiles[:])
 	}
 }
 
@@ -812,6 +866,9 @@ editor_command_execute :: proc(cmd: Cmd) {
 			editor_tile_insert(coords, gs.level)
 		}
 	}
+
+	recreate_colliders(gs.level.pos, &gs.colliders, gs.level.tiles[:])
+	autotile_run(gs.level)
 }
 
 editor_command_record :: proc(cmd: Cmd_Entry) {
@@ -887,4 +944,127 @@ spikes_from_area :: proc(p, q: Vec2i, l: ^Level) -> []Spike {
 	}
 
 	return spikes[:]
+}
+
+make_tileset :: proc() -> Tileset {
+	tileset: Tileset
+
+	rules := make([dynamic]Tileset_Rule)
+
+	// Centre
+	append(&rules, Tileset_Rule{src = {48, 48}})
+
+	// NW, NE, SE, SW
+	append(&rules, Tileset_Rule{neighbors = {.E, .S}, not_neighbors = {.N}, src = {16, 16}})
+	append(&rules, Tileset_Rule{neighbors = {.W, .S}, not_neighbors = {.N}, src = {80, 16}})
+	append(&rules, Tileset_Rule{neighbors = {.W, .N}, not_neighbors = {.S}, src = {80, 80}})
+	append(&rules, Tileset_Rule{neighbors = {.E, .N}, not_neighbors = {.S}, src = {16, 80}})
+
+	// N, E, S, W
+	append(&rules, Tileset_Rule{neighbors = {.E, .W, .S}, not_neighbors = {.N}, src = {48, 16}})
+	append(&rules, Tileset_Rule{neighbors = {.W, .SW, .NW}, not_neighbors = {.E}, src = {80, 48}})
+	append(&rules, Tileset_Rule{neighbors = {.E, .W, .N}, not_neighbors = {.S}, src = {48, 80}})
+	append(&rules, Tileset_Rule{neighbors = {.E, .SE, .NE}, not_neighbors = {.W}, src = {16, 48}})
+
+	// Outcropping E, W
+	append(&rules, Tileset_Rule{neighbors = {.W}, not_neighbors = {.N, .E, .S}, src = {16, 320}})
+	append(&rules, Tileset_Rule{neighbors = {.W}, not_neighbors = {.N, .S}, src = {16, 320}})
+	append(&rules, Tileset_Rule{neighbors = {.E}, not_neighbors = {.N, .W, .S}, src = {16, 320}})
+	append(&rules, Tileset_Rule{neighbors = {.E}, not_neighbors = {.N, .S}, src = {16, 320}})
+
+	// Outcropping N, S
+	append(&rules, Tileset_Rule{neighbors = {.S}, not_neighbors = {.E, .N, .W}, src = {16, 320}})
+	append(&rules, Tileset_Rule{neighbors = {.S}, not_neighbors = {.E, .W}, src = {16, 320}})
+	append(&rules, Tileset_Rule{neighbors = {.N}, not_neighbors = {.E, .S, .W}, src = {16, 320}})
+	append(&rules, Tileset_Rule{neighbors = {.N}, not_neighbors = {.E, .W}, src = {16, 320}})
+
+	// Outcropping Corners
+	append(&rules, Tileset_Rule{neighbors = {.N, .E}, src = {16, 320}, flags = {.Match_Exact}})
+	append(&rules, Tileset_Rule{neighbors = {.S, .E}, src = {16, 320}, flags = {.Match_Exact}})
+	append(&rules, Tileset_Rule{neighbors = {.S, .W}, src = {16, 320}, flags = {.Match_Exact}})
+	append(&rules, Tileset_Rule{neighbors = {.N, .W}, src = {16, 320}, flags = {.Match_Exact}})
+
+	// Outcropping Join
+	append(
+		&rules,
+		Tileset_Rule {
+			neighbors = {.N, .E, .S, .SW, .W, .NW},
+			src = {80, 48},
+			flags = {.Match_Exact},
+		},
+	)
+	append(
+		&rules,
+		Tileset_Rule {
+			neighbors = {.N, .NE, .E, .SE, .S, .W},
+			src = {16, 48},
+			flags = {.Match_Exact},
+		},
+	)
+	append(
+		&rules,
+		Tileset_Rule {
+			neighbors = {.N, .E, .SE, .S, .SW, .W},
+			src = {112, 16},
+			flags = {.Match_Exact},
+		},
+	)
+	append(
+		&rules,
+		Tileset_Rule {
+			neighbors = {.N, .E, .NE, .S, .NW, .W},
+			src = {48, 80},
+			flags = {.Match_Exact},
+		},
+	)
+
+	// Outcropping Cross
+	append(&rules, Tileset_Rule{neighbors = {.E, .S, .W}, src = {16, 320}, flags = {.Match_Exact}})
+	append(&rules, Tileset_Rule{neighbors = {.E, .N, .W}, src = {16, 320}, flags = {.Match_Exact}})
+	append(&rules, Tileset_Rule{neighbors = {.E, .N, .S}, src = {16, 320}, flags = {.Match_Exact}})
+	append(&rules, Tileset_Rule{neighbors = {.W, .N, .S}, src = {16, 320}, flags = {.Match_Exact}})
+
+	tileset.texture = gs.tileset_texture
+	tileset.rules = rules[:]
+
+	return tileset
+}
+
+autotile_calculate_neighbors :: proc(coords: Vec2i, l: ^Level) -> Tile_Neighbors {
+	result: Tile_Neighbors
+
+	if is_tile_at(coords + Dir8_Coords[.N], l) do result += {.N}
+	if is_tile_at(coords + Dir8_Coords[.E], l) do result += {.E}
+	if is_tile_at(coords + Dir8_Coords[.S], l) do result += {.S}
+	if is_tile_at(coords + Dir8_Coords[.W], l) do result += {.W}
+
+	if is_tile_at(coords + Dir8_Coords[.NE], l) do result += {.NE}
+	if is_tile_at(coords + Dir8_Coords[.SE], l) do result += {.SE}
+	if is_tile_at(coords + Dir8_Coords[.SW], l) do result += {.SW}
+	if is_tile_at(coords + Dir8_Coords[.NW], l) do result += {.NW}
+
+	return result
+}
+
+autotile_run :: proc(l: ^Level) {
+	for &tile in gs.level.tiles {
+		tile.src = 0
+	}
+
+	for rule in es.tileset.rules {
+		for &tile in gs.level.tiles {
+			coords := coords_from_pos(tile.pos)
+			neighbors := autotile_calculate_neighbors(coords, l)
+
+			if .Match_Exact in rule.flags {
+				if rule.neighbors == neighbors && rule.not_neighbors & neighbors == {} {
+					tile.src = rule.src
+				}
+			} else {
+				if rule.neighbors <= neighbors && rule.not_neighbors & neighbors == {} {
+					tile.src = rule.src
+				}
+			}
+		}
+	}
 }

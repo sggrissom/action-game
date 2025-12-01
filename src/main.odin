@@ -153,6 +153,8 @@ Game_State :: struct {
 	debug_shapes:          [dynamic]Debug_Shape,
 	colliders:             [dynamic]Rect,
 	player_texture:        rl.Texture,
+	item_texture:          rl.Texture,
+	tileset_texture:       rl.Texture,
 	scene:                 Scene_Type,
 	font_48:               rl.Font,
 	font_64:               rl.Font,
@@ -339,6 +341,7 @@ gs: ^Game_State
 
 game_init :: proc(gs: ^Game_State) {
 	gs.player_texture = rl.LoadTexture("assets/textures/player_120x80.png")
+	gs.item_texture = rl.LoadTexture("assets/textures/items_16x16.png")
 	gs.scene = .Game
 }
 
@@ -399,7 +402,10 @@ game_update :: proc(gs: ^Game_State) {
 
 				safety_check: {
 					for spike in gs.level.spikes {
-						if rl.CheckCollisionRecs(rect_pos_add(spike.collider, gs.level.pos), player.collider) {
+						if rl.CheckCollisionRecs(
+							rect_pos_add(spike.collider, gs.level.pos),
+							player.collider,
+						) {
 							break safety_check
 						}
 					}
@@ -429,9 +435,16 @@ game_update :: proc(gs: ^Game_State) {
 		rl.BeginMode2D(gs.camera)
 		rl.ClearBackground(BG_COLOR)
 
-		for rect in gs.colliders {
-			rl.DrawRectangleRec(rect, rl.WHITE)
-			rl.DrawRectangleLinesEx(rect, 1, rl.GRAY)
+		for tile in gs.level.tiles {
+			width: f32 = TILE_SIZE
+			height: f32 = TILE_SIZE
+
+			if tile.f == 1 || tile.f == 3 {
+				width = -TILE_SIZE
+			} else if tile.f == 2 || tile.f == 3 {
+				height = -TILE_SIZE
+			}
+			rl.DrawTextureRec(gs.tileset_texture, {tile.src.x, tile.src.y, width, height}, tile.pos, rl.WHITE)
 		}
 
 		for spike in gs.level.spikes {
@@ -627,9 +640,11 @@ main :: proc() {
 	world_data_save()
 
 	gs = new(Game_State)
-	editor_init()
 
 	rl.InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "simple test")
+
+	gs.tileset_texture = rl.LoadTexture("assets/textures/tileset.png")
+	editor_init()
 	rl.SetTargetFPS(60)
 
 	world_data_load()
