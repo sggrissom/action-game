@@ -56,6 +56,10 @@ Editor_State :: struct {
 	undo_count:        int,
 	spike_orientation: Direction,
 	tileset:           Tileset,
+	is_dragging:       bool,
+	drag_start:        Vec2,
+	drag_end:          Vec2,
+	deleted_levels:    [dynamic]Level,
 }
 
 Cmd :: union {
@@ -63,6 +67,11 @@ Cmd :: union {
 	Cmd_Tiles_Remove,
 	Cmd_Spikes_Insert,
 	Cmd_Spikes_Remove,
+	Cmd_Level_Move,
+	Cmd_Level_New,
+	Cmd_Level_Delete,
+	Cmd_Level_Restore,
+	Cmd_Level_Resize,
 }
 
 Cmd_Tiles_Insert :: struct {
@@ -83,6 +92,36 @@ Cmd_Spikes_Insert :: struct {
 Cmd_Spikes_Remove :: struct {
 	spikes:        []Spike,
 	tiles_removed: []Vec2i,
+}
+
+Cmd_Level_Move :: struct {
+	level_id: u32,
+	old_pos:  Vec2,
+	new_pos:  Vec2,
+}
+
+Cmd_Level_New :: struct {
+	pos:      Vec2,
+	size:     Vec2,
+	level_id: u32,
+}
+
+Cmd_Level_Delete :: struct {
+	level_id: u32,
+}
+
+Cmd_Level_Restore :: struct {
+	level_id: u32,
+}
+
+Cmd_Level_Resize :: struct {
+	level_id:       u32,
+	old_pos:        Vec2,
+	old_size:       Vec2,
+	new_pos:        Vec2,
+	new_size:       Vec2,
+	removed_tiles:  []Tile,
+	removed_spikes: []Spike,
 }
 
 Cmd_Entry :: struct {
@@ -397,7 +436,38 @@ editor_update :: proc(gs: ^Game_State, dt: f32) {
 		if rl.IsMouseButtonReleased(.RIGHT) {
 			editor_command_dispatch(Cmd_Spikes_Remove)
 		}
+
 	case .Level:
+		if es.is_dragging {
+			es.drag_end = rl.GetScreenToWorld2D(mouse_pos, gs.camera)
+			es.drag_end = linalg.round(es.drag_end / TILE_SIZE) * TILE_SIZE
+
+			if rl.IsMouseButtonReleased(.LEFT) {
+				es.is_dragging = false
+
+				start_coords := coords_from_pos(es.drag_start)
+				end_coords := coords_from_pos(es.drag_end)
+
+				if start_coords != end_coords {
+					editor_command_dispatch(Cmd_Level_Move)
+				}
+			}
+		} else {
+			for level in gs.levels {
+				level_rect := rect_from_pos_size(level.pos - gs.camera.target, level.size)
+				level_rect = rect_scale_all(level_rect, gs.camera.zoom)
+				if rl.CheckCollisionPointRec(mouse_pos, level_rect) {
+					if rl.IsMouseButtonPressed(.LEFT) {
+						level_load(gs, level.id, 0)
+					} else if rl.IsMouseButtonDown(.LEFT) {
+						es.is_dragging = true
+						es.drag_start = rl.GetScreenToWorld2D(mouse_pos, gs.camera)
+						es.drag_start = linalg.round(es.drag_start / TILE_SIZE) * TILE_SIZE
+					}
+				}
+			}
+		}
+
 		if rl.IsMouseButtonPressed(.LEFT) || rl.IsMouseButtonPressed(.RIGHT) {
 			es.area_begin = coords
 		}
@@ -407,8 +477,7 @@ editor_update :: proc(gs: ^Game_State, dt: f32) {
 		}
 
 		if rl.IsMouseButtonReleased(.LEFT) {
-			rect := rect_from_coords_any_orientation(es.area_begin, es.area_end)
-			editor_place_level(gs, rect)
+			editor_command_dispatch(Cmd_Level_New)
 		}
 
 		if rl.IsMouseButtonReleased(.RIGHT) {
@@ -416,13 +485,9 @@ editor_update :: proc(gs: ^Game_State, dt: f32) {
 			editor_remove_level(gs, rect)
 		}
 
-		for level in gs.levels {
-			level_rect := rect_from_pos_size(level.pos - gs.camera.target, level.size)
-			level_rect = rect_scale_all(level_rect, gs.camera.zoom)
-			if rl.CheckCollisionPointRec(mouse_pos, level_rect) {
-				if rl.IsMouseButtonPressed(.LEFT) {
-					level_load(gs, level.id, 0)
-				}
+		if rl.IsKeyPressed(.DELETE) {
+			if len(gs.levels) > 1 {
+				editor_command_dispatch(Cmd_Level_Delete)
 			}
 		}
 
@@ -449,15 +514,7 @@ editor_update :: proc(gs: ^Game_State, dt: f32) {
 		}
 	case .Level_Resize:
 		if rl.IsMouseButtonReleased(.LEFT) {
-			world_pos := rl.GetScreenToWorld2D(mouse_pos, gs.camera)
-
-			gs.level.pos, gs.level.size = calculate_resize(
-				gs.level,
-				world_pos,
-				es.resize_start_pos,
-				es.resize_level_dir,
-			)
-
+			editor_command_dispatch(Cmd_Level_Resize)
 			es.tool = .Level
 		}
 	}
@@ -492,12 +549,14 @@ editor_draw :: proc(gs: ^Game_State) {
 		rect = rect_scale_all(rect, gs.camera.zoom)
 
 		if es.tool == .Level || es.tool == .Level_Resize {
-			one_screen_rect := rect
-			one_screen_rect.width =
-				math.ceil(f32(RENDER_WIDTH) / TILE_SIZE) * TILE_SIZE * gs.camera.zoom
-			one_screen_rect.height =
-				math.ceil(f32(RENDER_HEIGHT) / TILE_SIZE) * TILE_SIZE * gs.camera.zoom
-			rl.DrawRectangleLinesEx(one_screen_rect, 1, rl.DARKGRAY)
+			if !es.is_dragging {
+				one_screen_rect := rect
+				one_screen_rect.width =
+					math.ceil(f32(RENDER_WIDTH) / TILE_SIZE) * TILE_SIZE * gs.camera.zoom
+				one_screen_rect.height =
+					math.ceil(f32(RENDER_HEIGHT) / TILE_SIZE) * TILE_SIZE * gs.camera.zoom
+				rl.DrawRectangleLinesEx(one_screen_rect, 1, rl.DARKGRAY)
+			}
 		} else {
 			rl.DrawRectangleLinesEx(rect, 4, place ? rl.WHITE : rl.RED)
 		}
@@ -511,6 +570,15 @@ editor_draw :: proc(gs: ^Game_State) {
 		for tile in l.tiles {
 			rl.DrawRectangleV(tile.pos, TILE_SIZE, rl.BROWN)
 		}
+	}
+
+	if es.is_dragging {
+		delta := es.drag_end - es.drag_start
+		rl.DrawRectangleLinesEx(
+			rect_from_pos_size(gs.level.pos + delta, gs.level.size),
+			2,
+			rl.GRAY,
+		)
 	}
 
 	rl.EndMode2D()
@@ -569,17 +637,25 @@ editor_draw :: proc(gs: ^Game_State) {
 
 	rl.EndMode2D()
 
-	if es.tool == .Level {
-		editor_panel(PANEL_WIDTH)
+	editor_panel(PANEL_WIDTH)
 
-		editor_panel_text(fmt.ctprintf("Level ID: %d", gs.level.id))
+	editor_panel_text(fmt.ctprintf("Level ID: %d", gs.level.id))
+	editor_panel_text(fmt.ctprintf("Tool: %s", es.tool))
+	editor_panel_text(
+		fmt.ctprintf(
+			"History: %d/%d",
+			len(es.command_history) - es.undo_count,
+			len(es.command_history),
+		),
+	)
+	editor_panel_text(fmt.ctprintf("Orientation: %v", es.spike_orientation))
+	editor_panel_text(fmt.ctprintf("Camera Zoom: %v", gs.camera.zoom))
 
-		level_pos_tiles := coords_from_pos(gs.level.pos)
-		editor_panel_text(fmt.ctprintf("Pos: %d, %d", level_pos_tiles.x, level_pos_tiles.y))
+	level_pos_tiles := coords_from_pos(gs.level.pos)
+	editor_panel_text(fmt.ctprintf("Pos: %d, %d", level_pos_tiles.x, level_pos_tiles.y))
 
-		level_size_tiles := coords_from_pos(gs.level.size)
-		editor_panel_text(fmt.ctprintf("Size: %d, %d", level_size_tiles.x, level_size_tiles.y))
-	}
+	level_size_tiles := coords_from_pos(gs.level.size)
+	editor_panel_text(fmt.ctprintf("Size: %d, %d", level_size_tiles.x, level_size_tiles.y))
 }
 
 is_tile_at_pos :: proc(pos: Vec2, l: ^Level) -> bool {
@@ -671,37 +747,6 @@ is_area_tiled :: proc(begin: Vec2i, end: Vec2i, l: ^Level) -> bool {
 	return true
 }
 
-editor_place_level :: proc(gs: ^Game_State, rect: Rect) {
-	// 1. Increase size to minimum level size
-	rect := rect
-	rect.width = max(rect.width, math.ceil(f32(RENDER_WIDTH) / TILE_SIZE) * TILE_SIZE)
-	rect.height = max(rect.height, math.ceil(f32(RENDER_HEIGHT) / TILE_SIZE) * TILE_SIZE)
-
-	// 2. Determine whether the level is in a valid spot
-	// - Overlapping other levels is not valid
-
-	is_valid_placement := true
-
-	for l in gs.levels {
-		def_rect := rect_from_pos_size(l.pos, l.size)
-		if rl.CheckCollisionRecs(rect, def_rect) {
-			is_valid_placement = false
-			break
-		}
-	}
-
-	if is_valid_placement {
-		level: Level
-		level.id = get_next_level_id(gs.levels[:])
-		level.name = strings.clone(fmt.tprintf("level_%d", level.id))
-		level.pos = {rect.x, rect.y}
-		level.player_spawn = level.pos
-		level.size = {rect.width, rect.height}
-		append(&gs.levels, level)
-		gs.level = level_from_id(gs.levels[:], level.id)
-	}
-}
-
 editor_remove_level :: proc(gs: ^Game_State, rect: Rect) {
 }
 
@@ -714,13 +759,20 @@ rect_from_coords_any_orientation :: proc(a, b: Vec2i) -> Rect {
 	return Rect{left, top, right - left + TILE_SIZE, bottom - top + TILE_SIZE}
 }
 
-get_next_level_id :: proc(levels: []Level) -> u32 {
-	id := u32(0)
-	for level in levels {
-		if level.id > id {
-			id = level.id
+get_next_level_id :: proc() -> u32 {
+	id := u32(1)
+	for l in es.deleted_levels {
+		if l.id > id {
+			id = l.id
 		}
 	}
+
+	for l in gs.levels {
+		if l.id > id {
+			id = l.id
+		}
+	}
+
 	return id + 1
 }
 
@@ -855,6 +907,126 @@ editor_command_construct :: proc(cmd_type: typeid) -> (cmd: Cmd_Entry, ok: bool)
 		}
 
 		return {forward, inverse}, true
+	case Cmd_Level_Move:
+		forward := Cmd_Level_Move {
+			level_id = gs.level.id,
+			old_pos  = es.drag_start,
+			new_pos  = es.drag_end,
+		}
+
+		inverse := Cmd_Level_Move {
+			level_id = forward.level_id,
+			old_pos  = forward.new_pos,
+			new_pos  = forward.old_pos,
+		}
+
+		return {forward, inverse}, true
+	case Cmd_Level_New:
+		mouse_pos := rl.GetMousePosition()
+		world_pos := rl.GetScreenToWorld2D(mouse_pos, gs.camera)
+		// Round to tile corner
+		coords := coords_from_pos(world_pos)
+		pos := pos_from_coords(coords)
+
+		// Default level size is one "screen"
+		size := linalg.ceil(Vec2{RENDER_WIDTH, RENDER_HEIGHT} / TILE_SIZE) * TILE_SIZE
+		rect := rect_from_pos_size(pos, size)
+
+		for l in gs.levels {
+			def_rect := rect_from_pos_size(l.pos, l.size)
+			if rl.CheckCollisionRecs(rect, def_rect) {
+				// Invalid position
+				return {}, false
+			}
+		}
+
+		level_id := get_next_level_id()
+
+		forward := Cmd_Level_New {
+			level_id = level_id,
+			pos      = pos,
+			size     = size,
+		}
+
+		inverse := Cmd_Level_Delete {
+			level_id = level_id,
+		}
+
+		return {forward, inverse}, true
+	case Cmd_Level_Delete:
+		forward := Cmd_Level_Delete {
+			level_id = gs.level.id,
+		}
+
+		inverse := Cmd_Level_Restore {
+			level_id = gs.level.id,
+		}
+
+		return {forward, inverse}, true
+	case Cmd_Level_Restore:
+		forward := Cmd_Level_Restore {
+			level_id = gs.level.id,
+		}
+
+		inverse := Cmd_Level_Delete {
+			level_id = gs.level.id,
+		}
+
+		return {forward, inverse}, true
+	case Cmd_Level_Resize:
+		mouse_pos := rl.GetMousePosition()
+		world_pos := rl.GetScreenToWorld2D(mouse_pos, gs.camera)
+		new_pos, new_size := calculate_resize(
+			gs.level,
+			world_pos,
+			es.resize_start_pos,
+			es.resize_level_dir,
+		)
+
+		removed_tiles := make([dynamic]Tile)
+		removed_spikes := make([dynamic]Spike)
+
+		new_rect := rect_from_pos_size(new_pos, new_size)
+
+		for tile in gs.level.tiles {
+			// Shrink slightly to account for floating point precision
+			rect := Rect{tile.pos.x + 1, tile.pos.y + 1, TILE_SIZE - 2, TILE_SIZE - 2}
+			if !rl.CheckCollisionRecs(new_rect, rect) {
+				append(&removed_tiles, tile)
+			}
+		}
+
+		for spike in gs.level.spikes {
+			// Shrink slightly to account for floating point precision
+			rect := rect_pos_add(spike.collider, 1)
+			rect.width -= 2
+			rect.height -= 2
+			if !rl.CheckCollisionRecs(new_rect, rect) {
+				append(&removed_spikes, spike)
+			}
+		}
+
+		forward := Cmd_Level_Resize {
+			level_id       = gs.level.id,
+			old_pos        = gs.level.pos,
+			old_size       = gs.level.size,
+			new_pos        = new_pos,
+			new_size       = new_size,
+			removed_tiles  = removed_tiles[:],
+			removed_spikes = removed_spikes[:],
+		}
+
+		inverse := Cmd_Level_Resize {
+			level_id       = forward.level_id,
+			old_pos        = forward.new_pos,
+			old_size       = forward.new_size,
+			new_pos        = forward.old_pos,
+			new_size       = forward.old_size,
+			removed_tiles  = removed_tiles[:],
+			removed_spikes = removed_spikes[:],
+		}
+
+		return {forward, inverse}, true
 	}
 
 
@@ -895,6 +1067,79 @@ editor_command_execute :: proc(cmd: Cmd) {
 		for coords in v.tiles_removed {
 			editor_tile_insert(coords, gs.level)
 		}
+	case Cmd_Level_Move:
+		level_load(gs, v.level_id, 0)
+
+		delta := v.new_pos - v.old_pos
+
+		gs.level.pos = gs.level.pos + delta
+
+		for &tile in gs.level.tiles {
+			tile.pos += delta
+		}
+	case Cmd_Level_New:
+		level: Level
+		level.id = v.level_id
+		level.name = strings.clone(fmt.tprintf("level_%d", level.id))
+		level.pos = v.pos
+		level.player_spawn = level.pos
+		level.size = v.size
+		append(&gs.levels, level)
+
+		level_load(gs, level.id, 0)
+	case Cmd_Level_Delete:
+		append(&es.deleted_levels, level_from_id(gs.levels[:], v.level_id)^)
+		deleted_level_index := level_index_from_id(gs.levels[:], v.level_id)
+		unordered_remove(&gs.levels, deleted_level_index)
+
+		for l in gs.levels {
+			if l.id != v.level_id {
+				level_load(gs, l.id, 0)
+			}
+		}
+	case Cmd_Level_Restore:
+		append(&gs.levels, level_from_id(es.deleted_levels[:], v.level_id)^)
+		restored_level_index := level_index_from_id(es.deleted_levels[:], v.level_id)
+		unordered_remove(&es.deleted_levels, restored_level_index)
+
+		level_load(gs, v.level_id, 0)
+	case Cmd_Level_Resize:
+		level_load(gs, v.level_id, 0)
+
+		if gs.level.size.x > v.new_size.x || gs.level.size.y > v.new_size.y {
+			for tile in v.removed_tiles {
+				tile_coords := coords_from_pos(tile.pos)
+				#reverse for level_tile, i in gs.level.tiles {
+					level_tile_coords := coords_from_pos(level_tile.pos)
+					if tile_coords == level_tile_coords {
+						ordered_remove(&gs.level.tiles, i)
+					}
+				}
+			}
+
+			for spike in v.removed_spikes {
+				spike_coords := coords_from_pos({spike.collider.x, spike.collider.y})
+				#reverse for level_spike, i in gs.level.spikes {
+					level_spike_coords := coords_from_pos(
+						{level_spike.collider.x, level_spike.collider.y},
+					)
+					if spike_coords == level_spike_coords {
+						ordered_remove(&gs.level.spikes, i)
+					}
+				}
+			}
+		} else {
+			for tile in v.removed_tiles {
+				append(&gs.level.tiles, tile)
+			}
+
+			for spike in v.removed_spikes {
+				append(&gs.level.spikes, spike)
+			}
+		}
+
+		gs.level.pos = v.new_pos
+		gs.level.size = v.new_size
 	}
 
 	recreate_colliders(gs.level.pos, &gs.colliders, gs.level.tiles[:])

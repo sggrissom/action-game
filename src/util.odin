@@ -27,3 +27,12 @@ rect_from_pos_size :: #force_inline proc(pos, size: Vec2) -> Rect {
 rect_pos_add :: #force_inline proc(rect: Rect, v: Vec2) -> Rect {
 	return Rect{rect.x + v.x, rect.y + v.y, rect.width, rect.height}
 }
+
+level_index_from_id :: proc(levels: []Level, id: u32) -> int {
+	for l, i in levels {
+		if l.id == id {
+			return i
+		}
+	}
+	return -1
+}

@@ -108,7 +108,7 @@ world_data_load :: proc() {
 				tile_type_index: u8
 				bytes.reader_read(&r, mem.any_to_bytes(tile_type_index))
 				if tile_type_index > 0 {
-					pos := Vec2{f32(x) * TILE_SIZE, f32(y) * TILE_SIZE}
+					pos := level.pos + pos_from_coords({i32(x), i32(y)})
 					append(&level.tiles, Tile{pos = pos})
 				}
 			}
