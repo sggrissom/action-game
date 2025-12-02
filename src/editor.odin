@@ -10,6 +10,8 @@ import "core:slice"
 import "core:strings"
 import rl "vendor:raylib"
 
+PANEL_WIDTH :: 260
+
 Editor_Tool :: enum {
 	None,
 	Tile,
@@ -259,9 +261,13 @@ calculate_resize_rect :: proc(level_rect: Rect, dir: Dir8) -> Rect {
 }
 
 editor_update :: proc(gs: ^Game_State, dt: f32) {
-	context.allocator = es.cmd_allocator
-
 	mouse_pos := rl.GetMousePosition()
+
+	if mouse_pos.x < PANEL_WIDTH {
+		return
+	}
+
+	context.allocator = es.cmd_allocator
 
 	rl.SetMouseCursor(.DEFAULT)
 
@@ -562,6 +568,18 @@ editor_draw :: proc(gs: ^Game_State) {
 	}
 
 	rl.EndMode2D()
+
+	if es.tool == .Level {
+		editor_panel(PANEL_WIDTH)
+
+		editor_panel_text(fmt.ctprintf("Level ID: %d", gs.level.id))
+
+		level_pos_tiles := coords_from_pos(gs.level.pos)
+		editor_panel_text(fmt.ctprintf("Pos: %d, %d", level_pos_tiles.x, level_pos_tiles.y))
+
+		level_size_tiles := coords_from_pos(gs.level.size)
+		editor_panel_text(fmt.ctprintf("Size: %d, %d", level_size_tiles.x, level_size_tiles.y))
+	}
 }
 
 is_tile_at_pos :: proc(pos: Vec2, l: ^Level) -> bool {

@@ -12,7 +12,7 @@ WINDOW_HEIGHT :: 720
 RENDER_WIDTH :: 640
 RENDER_HEIGHT :: 360
 ZOOM :: WINDOW_WIDTH / RENDER_WIDTH
-BG_COLOR :: rl.BLACK
+BG_COLOR :: rl.Color{50, 44, 67, 255}
 TILE_SIZE :: 16
 PHYSICS_ITERATIONS :: 8
 GRAVITY :: 5
@@ -155,6 +155,7 @@ Game_State :: struct {
 	item_texture:          rl.Texture,
 	tileset_texture:       rl.Texture,
 	scene:                 Scene_Type,
+	font_18:               rl.Font,
 	font_48:               rl.Font,
 	font_64:               rl.Font,
 	level:                 ^Level,
@@ -673,6 +674,7 @@ main :: proc() {
 
 	world_data_load()
 
+	gs.font_18 = rl.LoadFontEx("assets/fonts/Gogh-ExtraBold.ttf", 18, nil, 256)
 	gs.font_48 = rl.LoadFontEx("assets/fonts/Gogh-ExtraBold.ttf", 48, nil, 256)
 	gs.font_64 = rl.LoadFontEx("assets/fonts/Gogh-ExtraBold.ttf", 64, nil, 256)
 
