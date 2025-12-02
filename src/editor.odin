@@ -415,7 +415,7 @@ editor_update :: proc(gs: ^Game_State, dt: f32) {
 			level_rect = rect_scale_all(level_rect, gs.camera.zoom)
 			if rl.CheckCollisionPointRec(mouse_pos, level_rect) {
 				if rl.IsMouseButtonPressed(.LEFT) {
-					level_load(gs, level.id)
+					level_load(gs, level.id, 0)
 				}
 			}
 		}
@@ -496,6 +496,18 @@ editor_draw :: proc(gs: ^Game_State) {
 			rl.DrawRectangleLinesEx(rect, 4, place ? rl.WHITE : rl.RED)
 		}
 	}
+
+	rl.BeginMode2D(gs.camera)
+
+	for l in gs.levels {
+		if l.id == gs.level.id do continue
+
+		for tile in l.tiles {
+			rl.DrawRectangleV(tile.pos, TILE_SIZE, rl.BROWN)
+		}
+	}
+
+	rl.EndMode2D()
 
 	for l in gs.levels {
 		level_rect := Rect{l.pos.x, l.pos.y, l.size.x, l.size.y}
@@ -869,6 +881,7 @@ editor_command_execute :: proc(cmd: Cmd) {
 
 	recreate_colliders(gs.level.pos, &gs.colliders, gs.level.tiles[:])
 	autotile_run(gs.level)
+	world_data_save()
 }
 
 editor_command_record :: proc(cmd: Cmd_Entry) {
@@ -1053,15 +1066,12 @@ autotile_run :: proc(l: ^Level) {
 
 	for rule in es.tileset.rules {
 		for &tile in gs.level.tiles {
-			coords := coords_from_pos(tile.pos)
-			neighbors := autotile_calculate_neighbors(coords, l)
-
 			if .Match_Exact in rule.flags {
-				if rule.neighbors == neighbors && rule.not_neighbors & neighbors == {} {
+				if rule.neighbors == tile.neighbors && rule.not_neighbors & tile.neighbors == {} {
 					tile.src = rule.src
 				}
 			} else {
-				if rule.neighbors <= neighbors && rule.not_neighbors & neighbors == {} {
+				if rule.neighbors <= tile.neighbors && rule.not_neighbors & tile.neighbors == {} {
 					tile.src = rule.src
 				}
 			}

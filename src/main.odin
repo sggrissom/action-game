@@ -3,6 +3,7 @@ package main
 
 import "core:log"
 import "core:slice"
+import "core:strings"
 import "core:time"
 import rl "vendor:raylib"
 
@@ -61,9 +62,10 @@ Scene_Type :: enum {
 }
 
 Tile :: struct {
-	pos: Vec2,
-	src: Vec2,
-	f:   u8,
+	pos:       Vec2,
+	src:       Vec2,
+	neighbors: Tile_Neighbors,
+	f:         u8,
 }
 
 Spike :: struct {
@@ -102,10 +104,7 @@ Power_Up_Type :: enum {
 }
 
 Door :: struct {
-	id:       u32,
-	to_level: u32,
-	to_id:    u32,
-	rect:     Rect,
+	rect: Rect,
 }
 
 Level :: struct {
@@ -204,16 +203,41 @@ player_on_enter :: proc(self_id, other_id: Entity_Id) {
 	}
 }
 
-level_load :: proc(gs: ^Game_State, id: u32, player_spawn: Maybe(Vec2) = nil) {
+level_load :: proc(gs: ^Game_State, id: u32, player_spawn: Vec2) {
 	level := level_from_id(gs.levels[:], id)
 	if level == nil {
 		log.fatalf("Level with id `%d` could not be found.", id)
 	}
 	gs.level = level
 
+	player := entity_get(gs.player_id)
+	player_anim_name: string
+	player_health: int
+	player_vel: Vec2
+
+	if player != nil {
+		player_anim_name = strings.clone(player.current_anim_name, context.temp_allocator)
+		player_health = player.health
+		player_vel = player.vel
+	}
+
 	clear(&gs.entities)
 
-	spawn_player(gs)
+	spawn_player(gs, player_spawn)
+
+	if player_anim_name != "" {
+		player = entity_get(gs.player_id)
+		player.health = player_health
+		for k in player.animations {
+			if k == player_anim_name {
+				player.current_anim_name = k
+			}
+		}
+		player.vel = player_vel
+	}
+
+	recreate_colliders(level.pos, &gs.colliders, level.tiles[:])
+	autotile_run(level)
 
 	if level.on_enter != nil {
 		level.on_enter(gs)
@@ -221,7 +245,7 @@ level_load :: proc(gs: ^Game_State, id: u32, player_spawn: Maybe(Vec2) = nil) {
 
 }
 
-spawn_player :: proc(gs: ^Game_State) {
+spawn_player :: proc(gs: ^Game_State, player_spawn: Vec2) {
 	player_anim_idle := Animation {
 		size           = {120, 80},
 		offset         = {52, 42},
@@ -299,8 +323,8 @@ spawn_player :: proc(gs: ^Game_State) {
 
 	gs.player_id = entity_create(
 		{
-			x = gs.level.player_spawn.?.x,
-			y = gs.level.player_spawn.?.y,
+			x = player_spawn.x,
+			y = player_spawn.y,
 			width = 16,
 			height = 38,
 			move_speed = 220,
@@ -323,9 +347,6 @@ spawn_player :: proc(gs: ^Game_State) {
 		},
 	)
 
-	if pos, ok := gs.level.player_spawn.?; ok {
-		gs.safe_position = pos
-	}
 }
 
 level_from_id :: proc(levels: []Level, id: u32) -> ^Level {
@@ -444,7 +465,12 @@ game_update :: proc(gs: ^Game_State) {
 			} else if tile.f == 2 || tile.f == 3 {
 				height = -TILE_SIZE
 			}
-			rl.DrawTextureRec(gs.tileset_texture, {tile.src.x, tile.src.y, width, height}, tile.pos, rl.WHITE)
+			rl.DrawTextureRec(
+				gs.tileset_texture,
+				{tile.src.x, tile.src.y, width, height},
+				tile.pos,
+				rl.WHITE,
+			)
 		}
 
 		for spike in gs.level.spikes {
@@ -534,7 +560,7 @@ main_menu_update :: proc(gs: ^Game_State) {
 
 		if main_menu_item_draw("New Game", center + {0, 60}) {
 			game_init(gs)
-			level_load(gs, FIRST_LEVEL_ID)
+			level_load(gs, FIRST_LEVEL_ID, 0)
 			return
 		}
 
@@ -637,8 +663,6 @@ combine_colliders :: proc(world_pos: Vec2, solid_tiles: []Rect, colliders: ^[dyn
 }
 
 main :: proc() {
-	world_data_save()
-
 	gs = new(Game_State)
 
 	rl.InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "simple test")

@@ -76,6 +76,25 @@ player_update :: proc(gs: ^Game_State, dt: f32) {
 			break
 		}
 	}
+
+	{
+		overlap := rl.GetCollisionRec(
+			player.collider,
+			rect_from_pos_size(gs.level.pos, gs.level.size),
+		)
+		if overlap.width == 0 && overlap.height == 0 {
+			for l in gs.levels {
+				if rl.CheckCollisionRecs(player.collider, rect_from_pos_size(l.pos, l.size)) {
+					overlap = rl.GetCollisionRec(
+						player.collider,
+						rect_from_pos_size(l.pos, l.size),
+					)
+					level_load(gs, l.id, Vec2{overlap.x, overlap.y})
+					break
+				}
+			}
+		}
+	}
 }
 
 try_run :: proc(gs: ^Game_State, player: ^Entity) {
@@ -121,4 +140,3 @@ player_attack_callback :: proc(gs: ^Game_State, player: ^Entity) {
 		}
 	}
 }
-

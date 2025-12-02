@@ -4,7 +4,6 @@ import "core:bytes"
 import "core:mem"
 import "core:os"
 
-import "base:intrinsics"
 import "base:runtime"
 
 World_Data_Header :: struct {
@@ -21,8 +20,8 @@ World_Data_Tileset_Header :: struct {}
 World_Data_Level_Header :: struct {
 	magic:  u32,
 	id:     u32,
-	x:      u32,
-	y:      u32,
+	x:      i32,
+	y:      i32,
 	width:  u32,
 	height: u32,
 }
@@ -40,31 +39,38 @@ world_data_save :: proc() {
 		version_major = 0,
 		version_minor = 1,
 		version_patch = 0,
-		level_count   = 1,
+		level_count   = u32(len(gs.levels)),
 		tileset_count = 0,
 	}
 
 	bytes.buffer_write_ptr(&b, &header, size_of(World_Data_Header))
 
-	level_1 := World_Data_Level_Header {
-		magic  = LEVEL_MAGIC,
-		id     = 1,
-		width  = 40,
-		height = 23,
-	}
+	for level in gs.levels {
+		size_in_tiles := coords_from_pos(level.size)
+		pos_in_tiles := coords_from_pos(level.pos)
+		level_header := World_Data_Level_Header {
+			magic  = LEVEL_MAGIC,
+			id     = level.id,
+			x      = i32(pos_in_tiles.x),
+			y      = i32(pos_in_tiles.y),
+			width  = u32(size_in_tiles.x),
+			height = u32(size_in_tiles.y),
+		}
 
-	bytes.buffer_write_ptr(&b, &level_1, size_of(World_Data_Level_Header))
+		bytes.buffer_write_ptr(&b, &level_header, size_of(level_header))
 
-	tiles := make([]u8, level_1.width * level_1.height, context.temp_allocator)
+		tiles := make([]u8, level_header.width * level_header.height, context.temp_allocator)
 
-	for x in 0 ..< level_1.width {
-		tiles[(22 * level_1.width) + x] = 1
-	}
+		for tile in level.tiles {
+			coords := coords_from_pos(tile.pos - level.pos)
+			tiles[u32(coords.y) * level_header.width + u32(coords.x)] = 1
+		}
 
-	bytes.buffer_write(&b, tiles)
+		bytes.buffer_write(&b, tiles)
 
-	if !os.write_entire_file("data/world.dat", bytes.buffer_to_bytes(&b)) {
-		panic("Failed to write world file")
+		if !os.write_entire_file("data/world.dat", bytes.buffer_to_bytes(&b)) {
+			panic("Failed to write world file")
+		}
 	}
 }
 
@@ -94,10 +100,8 @@ world_data_load :: proc() {
 		assert(level_header.magic == LEVEL_MAGIC)
 
 		level.id = level_header.id
-		level.pos = Vec2{f32(level_header.x), f32(level_header.y)} * TILE_SIZE
-		level.size = Vec2{f32(level_header.width), f32(level_header.height)} * TILE_SIZE
-
-		solid_tiles := make([dynamic]Rect, context.temp_allocator)
+		level.pos = pos_from_coords({level_header.x, level_header.y})
+		level.size = pos_from_coords({i32(level_header.width), i32(level_header.height)})
 
 		for y in 0 ..< level_header.height {
 			for x in 0 ..< level_header.width {
@@ -105,13 +109,16 @@ world_data_load :: proc() {
 				bytes.reader_read(&r, mem.any_to_bytes(tile_type_index))
 				if tile_type_index > 0 {
 					pos := Vec2{f32(x) * TILE_SIZE, f32(y) * TILE_SIZE}
-					append(&solid_tiles, Rect{pos.x, pos.y, TILE_SIZE, TILE_SIZE})
 					append(&level.tiles, Tile{pos = pos})
 				}
 			}
 		}
 
-		combine_colliders(level.pos, solid_tiles[:], &gs.colliders)
+		for &tile in level.tiles {
+			tile.neighbors = autotile_calculate_neighbors(coords_from_pos(tile.pos), &level)
+		}
+
+		recreate_colliders(level.pos, &gs.colliders, level.tiles[:])
 
 		level.player_spawn = Vec2{100, 100}
 		append(&gs.levels, level)
