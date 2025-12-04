@@ -24,6 +24,8 @@ UP :: Vec2{0, -1}
 RIGHT :: Vec2{1, 0}
 DOWN :: Vec2{0, 1}
 LEFT :: Vec2{-1, 0}
+JUMP_TIME :: 0.2
+COYOTE_TIME :: 0.15
 
 PLAYER_SAFE_RESET_TIME :: 1
 FIRST_LEVEL_ID :: 1
@@ -163,6 +165,8 @@ Game_State :: struct {
 	checkpoint_level_id:   u32,
 	checkpoint_id:         u32,
 	editor_enabled:        bool,
+	jump_timer:            f32,
+	coyote_timer:          f32,
 }
 
 Save_Data :: struct {

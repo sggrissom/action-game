@@ -25,6 +25,9 @@ player_update :: proc(gs: ^Game_State, dt: f32) {
 		player.flags -= {.Left}
 	}
 
+	gs.jump_timer -= dt
+	gs.coyote_timer -= dt
+
 	switch gs.player_movement_state {
 	case .Uncontrollable:
 		gs.safe_reset_timer -= dt
@@ -50,6 +53,10 @@ player_update :: proc(gs: ^Game_State, dt: f32) {
 		try_jump(gs, player)
 		try_attack(gs, player)
 	case .Jump:
+		if rl.IsKeyReleased(.SPACE) {
+			player.vel.y *= 0.5
+		}
+
 		if player.vel.y >= 0 {
 			gs.player_movement_state = .Fall
 			player.current_anim_name = "fall"
@@ -105,7 +112,15 @@ try_run :: proc(gs: ^Game_State, player: ^Entity) {
 }
 
 try_jump :: proc(gs: ^Game_State, player: ^Entity) {
-	if rl.IsKeyPressed(.SPACE) && .Grounded in player.flags {
+	if rl.IsKeyPressed(.SPACE) {
+		gs.jump_timer = JUMP_TIME
+	}
+
+	if .Grounded in player.flags {
+		gs.coyote_timer = COYOTE_TIME
+	}
+
+	if gs.player_movement_state != .Fall && gs.coyote_timer > 0 && gs.jump_timer > 0 {
 		player.vel.y = -player.jump_force
 		player.flags -= {.Grounded}
 		switch_animation(player, "jump")
