@@ -229,6 +229,7 @@ level_load :: proc(gs: ^Game_State, id: u32, player_spawn: Vec2) {
 	clear(&gs.entities)
 
 	spawn_player(gs, player_spawn)
+	spawn_enemies(gs)
 
 	if player_anim_name != "" {
 		player = entity_get(gs.player_id)
@@ -352,6 +353,24 @@ spawn_player :: proc(gs: ^Game_State, player_spawn: Vec2) {
 		},
 	)
 
+}
+
+spawn_enemies :: proc(gs: ^Game_State) {
+	for spawn in gs.level.enemy_spawns {
+		entity_create(
+			{
+				x = spawn.pos.x,
+				y = spawn.pos.y,
+				width = 16,
+				height = 16,
+				move_speed = 60,
+				behaviors = {.Walk, .Flip_At_Wall, .Flip_At_Edge},
+				health = 1,
+				max_health = 1,
+				debug_color = rl.RED,
+			},
+		)
+	}
 }
 
 level_from_id :: proc(levels: []Level, id: u32) -> ^Level {

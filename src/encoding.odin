@@ -37,7 +37,7 @@ world_data_save :: proc() {
 	header := World_Data_Header {
 		magic         = HEADER_MAGIC,
 		version_major = 0,
-		version_minor = 1,
+		version_minor = 2,
 		version_patch = 0,
 		level_count   = u32(len(gs.levels)),
 		tileset_count = 0,
@@ -68,9 +68,22 @@ world_data_save :: proc() {
 
 		bytes.buffer_write(&b, tiles)
 
-		if !os.write_entire_file("data/world.dat", bytes.buffer_to_bytes(&b)) {
-			panic("Failed to write world file")
+		// Write enemy spawns
+		enemy_count := u32(len(level.enemy_spawns))
+		bytes.buffer_write_ptr(&b, &enemy_count, size_of(u32))
+
+		for spawn in level.enemy_spawns {
+			enemy_type := u8(spawn.type)
+			bytes.buffer_write_ptr(&b, &enemy_type, size_of(u8))
+			x := spawn.pos.x
+			y := spawn.pos.y
+			bytes.buffer_write_ptr(&b, &x, size_of(f32))
+			bytes.buffer_write_ptr(&b, &y, size_of(f32))
 		}
+	}
+
+	if !os.write_entire_file("data/world.dat", bytes.buffer_to_bytes(&b)) {
+		panic("Failed to write world file")
 	}
 }
 
@@ -116,6 +129,25 @@ world_data_load :: proc() {
 
 		for &tile in level.tiles {
 			tile.neighbors = autotile_calculate_neighbors(coords_from_pos(tile.pos), &level)
+		}
+
+		// Read enemy spawns (version 0.2+)
+		if header.version_minor >= 2 {
+			enemy_count: u32
+			bytes.reader_read(&r, mem.any_to_bytes(enemy_count))
+
+			for _ in 0 ..< enemy_count {
+				enemy_type: u8
+				x, y: f32
+				bytes.reader_read(&r, mem.any_to_bytes(enemy_type))
+				bytes.reader_read(&r, mem.any_to_bytes(x))
+				bytes.reader_read(&r, mem.any_to_bytes(y))
+
+				append(
+					&level.enemy_spawns,
+					Enemy_Spawn{type = Enemy_Type(enemy_type), pos = Vec2{x, y}},
+				)
+			}
 		}
 
 		recreate_colliders(level.pos, &gs.colliders, level.tiles[:])

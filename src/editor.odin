@@ -16,6 +16,7 @@ Editor_Tool :: enum {
 	None,
 	Tile,
 	Spike,
+	Enemy,
 	Level,
 	Level_Resize,
 }
@@ -67,6 +68,8 @@ Cmd :: union {
 	Cmd_Tiles_Remove,
 	Cmd_Spikes_Insert,
 	Cmd_Spikes_Remove,
+	Cmd_Enemies_Insert,
+	Cmd_Enemies_Remove,
 	Cmd_Level_Move,
 	Cmd_Level_New,
 	Cmd_Level_Delete,
@@ -92,6 +95,14 @@ Cmd_Spikes_Insert :: struct {
 Cmd_Spikes_Remove :: struct {
 	spikes:        []Spike,
 	tiles_removed: []Vec2i,
+}
+
+Cmd_Enemies_Insert :: struct {
+	spawns: []Enemy_Spawn,
+}
+
+Cmd_Enemies_Remove :: struct {
+	spawns: []Enemy_Spawn,
 }
 
 Cmd_Level_Move :: struct {
@@ -342,6 +353,10 @@ editor_update :: proc(gs: ^Game_State, dt: f32) {
 			es.tool = .Spike
 		}
 
+		if rl.IsKeyPressed(.E) {
+			es.tool = .Enemy
+		}
+
 		if rl.IsKeyPressed(.F) {
 			es.spike_orientation += Direction(1)
 			if int(es.spike_orientation) > 3 {
@@ -435,6 +450,20 @@ editor_update :: proc(gs: ^Game_State, dt: f32) {
 
 		if rl.IsMouseButtonReleased(.RIGHT) {
 			editor_command_dispatch(Cmd_Spikes_Remove)
+		}
+
+	case .Enemy:
+		if rl.IsMouseButtonPressed(.LEFT) || rl.IsMouseButtonPressed(.RIGHT) {
+			es.area_begin = coords
+			es.area_end = coords
+		}
+
+		if rl.IsMouseButtonReleased(.LEFT) {
+			editor_command_dispatch(Cmd_Enemies_Insert)
+		}
+
+		if rl.IsMouseButtonReleased(.RIGHT) {
+			editor_command_dispatch(Cmd_Enemies_Remove)
 		}
 
 	case .Level:
@@ -635,6 +664,11 @@ editor_draw :: proc(gs: ^Game_State) {
 		}
 	}
 
+	// Draw enemy spawns
+	for spawn in gs.level.enemy_spawns {
+		rl.DrawRectangleV(spawn.pos, 16, rl.RED)
+	}
+
 	rl.EndMode2D()
 
 	editor_panel(PANEL_WIDTH)
@@ -733,6 +767,19 @@ editor_spike_index :: proc(coords: Vec2i, l: ^Level) -> (index: int, ok: bool) {
 editor_spike_remove :: proc(spike: Spike, l: ^Level) {
 	if index, ok := slice.linear_search(l.spikes[:], spike); ok {
 		unordered_remove(&l.spikes, index)
+	}
+}
+
+editor_enemy_insert :: proc(spawn: Enemy_Spawn, l: ^Level) {
+	append(&l.enemy_spawns, spawn)
+}
+
+editor_enemy_remove :: proc(spawn: Enemy_Spawn, l: ^Level) {
+	for s, i in l.enemy_spawns {
+		if s.pos == spawn.pos && s.type == spawn.type {
+			unordered_remove(&l.enemy_spawns, i)
+			return
+		}
 	}
 }
 
@@ -907,6 +954,45 @@ editor_command_construct :: proc(cmd_type: typeid) -> (cmd: Cmd_Entry, ok: bool)
 		}
 
 		return {forward, inverse}, true
+	case Cmd_Enemies_Insert:
+		pos := pos_from_coords(es.area_begin) + gs.level.pos
+
+		// Check if outside level bounds
+		if !rl.CheckCollisionPointRec(pos, rect_from_pos_size(gs.level.pos, gs.level.size)) {
+			return
+		}
+
+		// Check if enemy already exists at this position
+		for spawn in gs.level.enemy_spawns {
+			if spawn.pos == pos {
+				return
+			}
+		}
+
+		spawns := make([]Enemy_Spawn, 1)
+		spawns[0] = Enemy_Spawn{type = .Walker, pos = pos}
+
+		forward := Cmd_Enemies_Insert{spawns = spawns}
+		inverse := Cmd_Enemies_Remove{spawns = spawns}
+
+		return {forward, inverse}, true
+	case Cmd_Enemies_Remove:
+		pos := pos_from_coords(es.area_begin) + gs.level.pos
+
+		// Find enemy at this position
+		for spawn in gs.level.enemy_spawns {
+			if spawn.pos == pos {
+				spawns := make([]Enemy_Spawn, 1)
+				spawns[0] = spawn
+
+				forward := Cmd_Enemies_Remove{spawns = spawns}
+				inverse := Cmd_Enemies_Insert{spawns = spawns}
+
+				return {forward, inverse}, true
+			}
+		}
+
+		return
 	case Cmd_Level_Move:
 		forward := Cmd_Level_Move {
 			level_id = gs.level.id,
@@ -1066,6 +1152,14 @@ editor_command_execute :: proc(cmd: Cmd) {
 
 		for coords in v.tiles_removed {
 			editor_tile_insert(coords, gs.level)
+		}
+	case Cmd_Enemies_Insert:
+		for spawn in v.spawns {
+			editor_enemy_insert(spawn, gs.level)
+		}
+	case Cmd_Enemies_Remove:
+		for spawn in v.spawns {
+			editor_enemy_remove(spawn, gs.level)
 		}
 	case Cmd_Level_Move:
 		level_load(gs, v.level_id, 0)
