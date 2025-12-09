@@ -1,10 +1,12 @@
 package main
 
+import "core:math/linalg"
 import rl "vendor:raylib"
 
 Player_Movement_State :: enum {
 	Uncontrollable,
 	Attacking,
+	Attack_Cooldown,
 	Idle,
 	Run,
 	Jump,
@@ -19,10 +21,12 @@ player_update :: proc(gs: ^Game_State, dt: f32) {
 	if rl.IsKeyDown(.A) do input_x -= 1
 
 	player.vel.x = input_x * player.move_speed
-	if player.vel.x < 0 {
-		player.flags += {.Left}
-	} else if player.vel.x > 0 {
-		player.flags -= {.Left}
+	if player.vel.x > 0 do player.flags -= {.Left}
+	if player.vel.x < 0 do player.flags += {.Left}
+
+	if gs.attack_recovery_timer > 0 {
+		gs.attack_recovery_timer -= dt
+		player.vel *= 0.5
 	}
 
 	gs.jump_timer -= dt
@@ -38,9 +42,12 @@ player_update :: proc(gs: ^Game_State, dt: f32) {
 			gs.player_movement_state = .Idle
 		}
 	case .Attacking:
-		if .Grounded in player.flags {
-			player.vel.x = 0
+	case .Attack_Cooldown:
+		gs.attack_cooldown_timer -= dt
+		if gs.attack_cooldown_timer <= 0 {
+			gs.player_movement_state = .Idle
 		}
+		try_run(gs, player)
 	case .Idle:
 		try_run(gs, player)
 		try_jump(gs, player)
@@ -132,12 +139,13 @@ try_attack :: proc(gs: ^Game_State, player: ^Entity) {
 	if rl.IsMouseButtonPressed(.LEFT) {
 		switch_animation(player, "attack")
 		gs.player_movement_state = .Attacking
+		gs.attack_cooldown_timer = ATTACK_COOLDOWN_DURATION
 	}
 }
 
 player_on_finish_attack :: proc(gs: ^Game_State, player: ^Entity) {
 	switch_animation(player, "idle")
-	gs.player_movement_state = .Fall
+	gs.player_movement_state = .Attack_Cooldown
 }
 
 player_attack_callback :: proc(gs: ^Game_State, player: ^Entity) {
@@ -152,6 +160,16 @@ player_attack_callback :: proc(gs: ^Game_State, player: ^Entity) {
 
 		if rl.CheckCollisionCircleRec(center, 25, e.collider) {
 			entity_damage(Entity_Id(i), 1)
+			a := rect_center(player.collider)
+			b := rect_center(e.collider)
+			dir := linalg.normalize0(b - a)
+
+			player.vel.x = -dir.x * 500
+			player.vel.y = -dir.y * 200 - 100
+
+			gs.attack_recovery_timer = ATTACK_RECOVERY_DURATION
+
+			entity_hit(Entity_Id(i), dir * 500)
 		}
 	}
 }

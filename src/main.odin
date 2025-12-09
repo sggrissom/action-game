@@ -26,6 +26,8 @@ DOWN :: Vec2{0, 1}
 LEFT :: Vec2{-1, 0}
 JUMP_TIME :: 0.2
 COYOTE_TIME :: 0.15
+ATTACK_COOLDOWN_DURATION :: 0.3
+ATTACK_RECOVERY_DURATION :: 0.2
 
 PLAYER_SAFE_RESET_TIME :: 1
 FIRST_LEVEL_ID :: 1
@@ -43,6 +45,7 @@ Entity_Flags :: enum {
 	Debug_Draw,
 	Left,
 	Immortal,
+	Frozen,
 }
 
 Entity_Behaviors :: enum {
@@ -80,6 +83,11 @@ Enemy_Type :: enum {
 	Jumper,
 	Charger,
 	Orb,
+}
+
+Entity_Hit_Response :: enum {
+	Stop,
+	Knockback,
 }
 
 Enemy_Spawn :: struct {
@@ -142,6 +150,9 @@ Entity :: struct {
 	current_anim_name:          string,
 	current_anim_frame:         int,
 	animation_timer:            f32,
+	hit_timer:                  f32,
+	hit_duration:               f32,
+	hit_response:               Entity_Hit_Response,
 }
 
 Game_State :: struct {
@@ -167,6 +178,10 @@ Game_State :: struct {
 	editor_enabled:        bool,
 	jump_timer:            f32,
 	coyote_timer:          f32,
+	enemy_definitions:     map[Enemy_Type]Enemy_Def,
+	debug_draw_enabled:    bool,
+	attack_cooldown_timer: f32,
+	attack_recovery_timer: f32,
 }
 
 Save_Data :: struct {
@@ -197,6 +212,20 @@ Animation_Event :: struct {
 	timer:    f32,
 	duration: f32,
 	callback: proc(gs: ^Game_State, entity: ^Entity),
+}
+
+Enemy_Def :: struct {
+	collider_size:       Vec2,
+	move_speed:          f32,
+	behaviors:           bit_set[Entity_Behaviors],
+	health:              int,
+	on_hit_damage:       int,
+	texture:             rl.Texture2D,
+	animations:          map[string]Animation,
+	initial_animation:   string,
+	hit_response:        Entity_Hit_Response,
+	hit_duration:        f32,
+	hit_knockback_force: f32,
 }
 
 player_on_enter :: proc(self_id, other_id: Entity_Id) {
@@ -357,19 +386,29 @@ spawn_player :: proc(gs: ^Game_State, player_spawn: Vec2) {
 
 spawn_enemies :: proc(gs: ^Game_State) {
 	for spawn in gs.level.enemy_spawns {
-		entity_create(
-			{
-				x = spawn.pos.x,
-				y = spawn.pos.y,
-				width = 16,
-				height = 16,
-				move_speed = 60,
-				behaviors = {.Walk, .Flip_At_Wall, .Flip_At_Edge},
-				health = 1,
-				max_health = 1,
-				debug_color = rl.RED,
+		def := &gs.enemy_definitions[spawn.type]
+
+		enemy := Entity {
+			collider          = {
+				spawn.pos.x,
+				spawn.pos.y,
+				def.collider_size.x,
+				def.collider_size.y,
 			},
-		)
+			move_speed        = def.move_speed,
+			behaviors         = def.behaviors,
+			health            = def.health,
+			on_hit_damage     = def.on_hit_damage,
+			texture           = &def.texture,
+			animations        = def.animations,
+			current_anim_name = def.initial_animation,
+			debug_color       = rl.RED,
+			flags             = {.Debug_Draw},
+			hit_response      = def.hit_response,
+			hit_duration      = def.hit_duration,
+		}
+
+		entity_create(enemy)
 	}
 }
 
@@ -502,6 +541,7 @@ game_update :: proc(gs: ^Game_State) {
 		}
 
 		for &e in gs.entities {
+			if .Dead in e.flags do continue
 			if e.texture != nil && len(e.animations) > 0 {
 				anim := e.animations[e.current_anim_name]
 
@@ -532,18 +572,20 @@ game_update :: proc(gs: ^Game_State) {
 
 		rl.DrawRectangleLinesEx(player.collider, 1, rl.GREEN)
 
-		for s in gs.debug_shapes {
-			switch v in s {
-			case Debug_Line:
-				rl.DrawLineEx(v.start, v.end, v.thickness, v.color)
-			case Debug_Rect:
-				rl.DrawRectangleLinesEx(
-					{v.pos.x, v.pos.y, v.size.x, v.size.y},
-					v.thickness,
-					v.color,
-				)
-			case Debug_Circle:
-				rl.DrawCircleLinesV(v.pos, v.radius, v.color)
+		if gs.debug_draw_enabled {
+			for s in gs.debug_shapes {
+				switch v in s {
+				case Debug_Line:
+					rl.DrawLineEx(v.start, v.end, v.thickness, v.color)
+				case Debug_Rect:
+					rl.DrawRectangleLinesEx(
+						{v.pos.x, v.pos.y, v.size.x, v.size.y},
+						v.thickness,
+						v.color,
+					)
+				case Debug_Circle:
+					rl.DrawCircleLinesV(v.pos, v.radius, v.color)
+				}
 			}
 		}
 
@@ -692,6 +734,28 @@ main :: proc() {
 	rl.InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "simple test")
 
 	gs.tileset_texture = rl.LoadTexture("assets/textures/tileset.png")
+	gs.enemy_definitions[.Walker] = Enemy_Def {
+		collider_size = {36, 18},
+		move_speed = 35,
+		health = 3,
+		behaviors = {.Walk, .Flip_At_Wall, .Flip_At_Edge},
+		on_hit_damage = 1,
+		texture = rl.LoadTexture("assets/textures/opossum_36x28.png"),
+		animations = {
+			"walk" = Animation {
+				size = {36, 28},
+				offset = {0, 10},
+				start = 0,
+				end = 5,
+				time = 0.15,
+				flags = {.Loop},
+			},
+		},
+		initial_animation = "walk",
+		hit_response = .Stop,
+		hit_duration = 0.25,
+	}
+
 	editor_init()
 	rl.SetTargetFPS(60)
 

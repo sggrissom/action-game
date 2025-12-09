@@ -31,7 +31,20 @@ entity_update :: proc(gs: ^Game_State, dt: f32) {
 		if len(e.animations) > 0 {
 			anim := e.animations[e.current_anim_name]
 
-			e.animation_timer -= dt
+			if e.hit_timer > 0 {
+				e.hit_timer -= dt
+				if e.hit_timer <= 0 {
+					#partial switch e.hit_response {
+					case .Stop:
+						e.behaviors += {.Walk}
+						e.flags -= {.Frozen}
+					}
+				}
+			}
+
+			if .Frozen not_in e.flags {
+				e.animation_timer -= dt
+			}
 			if e.animation_timer <= 0 {
 				e.current_anim_frame += 1
 				e.animation_timer = anim.time
@@ -81,3 +94,16 @@ entity_damage :: proc(id: Entity_Id, amount: int) {
 	}
 }
 
+entity_hit :: proc(id: Entity_Id, hit_force := Vec2{}) {
+	entity := entity_get(id)
+	entity.hit_timer = entity.hit_duration
+
+	switch entity.hit_response {
+	case .Stop:
+		entity.behaviors -= {.Walk}
+		entity.flags += {.Frozen}
+		entity.vel = 0
+	case .Knockback:
+		entity.vel += hit_force
+	}
+}
