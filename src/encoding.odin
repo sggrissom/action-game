@@ -37,7 +37,7 @@ world_data_save :: proc() {
 	header := World_Data_Header {
 		magic         = HEADER_MAGIC,
 		version_major = 0,
-		version_minor = 3,
+		version_minor = 4,
 		version_patch = 0,
 		level_count   = u32(len(gs.levels)),
 		tileset_count = 0,
@@ -92,6 +92,21 @@ world_data_save :: proc() {
 			y := spike.collider.y
 			w := spike.collider.width
 			h := spike.collider.height
+			bytes.buffer_write_ptr(&b, &x, size_of(f32))
+			bytes.buffer_write_ptr(&b, &y, size_of(f32))
+			bytes.buffer_write_ptr(&b, &w, size_of(f32))
+			bytes.buffer_write_ptr(&b, &h, size_of(f32))
+		}
+
+		// Write falling log spawns
+		log_count := u32(len(level.falling_log_spawns))
+		bytes.buffer_write_ptr(&b, &log_count, size_of(u32))
+
+		for spawn in level.falling_log_spawns {
+			x := spawn.rect.x
+			y := spawn.rect.y
+			w := spawn.rect.width
+			h := spawn.rect.height
 			bytes.buffer_write_ptr(&b, &x, size_of(f32))
 			bytes.buffer_write_ptr(&b, &y, size_of(f32))
 			bytes.buffer_write_ptr(&b, &w, size_of(f32))
@@ -182,6 +197,22 @@ world_data_load :: proc() {
 				bytes.reader_read(&r, mem.any_to_bytes(h))
 
 				append(&level.spikes, Spike{collider = {x, y, w, h}, facing = Direction(facing)})
+			}
+		}
+
+		// Read falling log spawns (version 0.4+)
+		if header.version_minor >= 4 {
+			log_count: u32
+			bytes.reader_read(&r, mem.any_to_bytes(log_count))
+
+			for _ in 0 ..< log_count {
+				x, y, w, h: f32
+				bytes.reader_read(&r, mem.any_to_bytes(x))
+				bytes.reader_read(&r, mem.any_to_bytes(y))
+				bytes.reader_read(&r, mem.any_to_bytes(w))
+				bytes.reader_read(&r, mem.any_to_bytes(h))
+
+				append(&level.falling_log_spawns, Falling_Log_Spawn{rect = {x, y, w, h}})
 			}
 		}
 

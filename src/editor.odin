@@ -17,6 +17,7 @@ Editor_Tool :: enum {
 	Tile,
 	Spike,
 	Enemy,
+	Falling_Log,
 	Level,
 	Level_Resize,
 }
@@ -70,6 +71,8 @@ Cmd :: union {
 	Cmd_Spikes_Remove,
 	Cmd_Enemies_Insert,
 	Cmd_Enemies_Remove,
+	Cmd_Falling_Logs_Insert,
+	Cmd_Falling_Logs_Remove,
 	Cmd_Level_Move,
 	Cmd_Level_New,
 	Cmd_Level_Delete,
@@ -103,6 +106,14 @@ Cmd_Enemies_Insert :: struct {
 
 Cmd_Enemies_Remove :: struct {
 	spawns: []Enemy_Spawn,
+}
+
+Cmd_Falling_Logs_Insert :: struct {
+	spawns: []Falling_Log_Spawn,
+}
+
+Cmd_Falling_Logs_Remove :: struct {
+	spawns: []Falling_Log_Spawn,
 }
 
 Cmd_Level_Move :: struct {
@@ -357,6 +368,10 @@ editor_update :: proc(gs: ^Game_State, dt: f32) {
 			es.tool = .Enemy
 		}
 
+		if rl.IsKeyPressed(.L) {
+			es.tool = .Falling_Log
+		}
+
 		if rl.IsKeyPressed(.F) {
 			es.spike_orientation += Direction(1)
 			if int(es.spike_orientation) > 3 {
@@ -464,6 +479,20 @@ editor_update :: proc(gs: ^Game_State, dt: f32) {
 
 		if rl.IsMouseButtonReleased(.RIGHT) {
 			editor_command_dispatch(Cmd_Enemies_Remove)
+		}
+
+	case .Falling_Log:
+		if rl.IsMouseButtonPressed(.LEFT) || rl.IsMouseButtonPressed(.RIGHT) {
+			es.area_begin = coords
+			es.area_end = coords
+		}
+
+		if rl.IsMouseButtonReleased(.LEFT) {
+			editor_command_dispatch(Cmd_Falling_Logs_Insert)
+		}
+
+		if rl.IsMouseButtonReleased(.RIGHT) {
+			editor_command_dispatch(Cmd_Falling_Logs_Remove)
 		}
 
 	case .Level:
@@ -667,6 +696,19 @@ editor_draw :: proc(gs: ^Game_State) {
 	// Draw enemy spawns
 	for spawn in gs.level.enemy_spawns {
 		rl.DrawRectangleV(spawn.pos, 16, rl.RED)
+	}
+
+	// Draw falling log spawns (use runtime logs for accurate rope height)
+	for falling_log in gs.falling_logs {
+		rl.DrawRectangleRec(falling_log.collider, {139, 90, 43, 180}) // Brown with transparency
+		// Draw rope to ceiling
+		center_x := falling_log.collider.x + falling_log.collider.width / 2
+		rl.DrawLineEx(
+			{center_x, falling_log.collider.y},
+			{center_x, falling_log.collider.y - falling_log.rope_height},
+			2,
+			{139, 90, 43, 180},
+		)
 	}
 
 	rl.EndMode2D()
@@ -993,6 +1035,50 @@ editor_command_construct :: proc(cmd_type: typeid) -> (cmd: Cmd_Entry, ok: bool)
 		}
 
 		return
+	case Cmd_Falling_Logs_Insert:
+		world_pos := pos_from_coords(es.area_begin)
+		// Convert to level-relative coordinates
+		rel_pos := world_pos - gs.level.pos
+
+		// Check if outside level bounds
+		level_rect := rect_from_pos_size(0, gs.level.size)
+		spawn_rect := Rect{rel_pos.x, rel_pos.y, FALLING_LOG_WIDTH, FALLING_LOG_HEIGHT}
+		if !rl.CheckCollisionRecs(spawn_rect, level_rect) {
+			return
+		}
+
+		// Check if log already exists at this position
+		for spawn in gs.level.falling_log_spawns {
+			if spawn.rect.x == spawn_rect.x && spawn.rect.y == spawn_rect.y {
+				return
+			}
+		}
+
+		spawns := make([]Falling_Log_Spawn, 1)
+		spawns[0] = Falling_Log_Spawn{rect = spawn_rect}
+
+		forward := Cmd_Falling_Logs_Insert{spawns = spawns}
+		inverse := Cmd_Falling_Logs_Remove{spawns = spawns}
+
+		return {forward, inverse}, true
+	case Cmd_Falling_Logs_Remove:
+		world_pos := pos_from_coords(es.area_begin)
+		rel_pos := world_pos - gs.level.pos
+
+		// Find log at this position
+		for spawn in gs.level.falling_log_spawns {
+			if rl.CheckCollisionPointRec(rel_pos, spawn.rect) {
+				spawns := make([]Falling_Log_Spawn, 1)
+				spawns[0] = spawn
+
+				forward := Cmd_Falling_Logs_Remove{spawns = spawns}
+				inverse := Cmd_Falling_Logs_Insert{spawns = spawns}
+
+				return {forward, inverse}, true
+			}
+		}
+
+		return
 	case Cmd_Level_Move:
 		forward := Cmd_Level_Move {
 			level_id = gs.level.id,
@@ -1161,6 +1247,19 @@ editor_command_execute :: proc(cmd: Cmd) {
 		for spawn in v.spawns {
 			editor_enemy_remove(spawn, gs.level)
 		}
+	case Cmd_Falling_Logs_Insert:
+		for spawn in v.spawns {
+			append(&gs.level.falling_log_spawns, spawn)
+		}
+	case Cmd_Falling_Logs_Remove:
+		for spawn in v.spawns {
+			for s, i in gs.level.falling_log_spawns {
+				if s.rect.x == spawn.rect.x && s.rect.y == spawn.rect.y {
+					unordered_remove(&gs.level.falling_log_spawns, i)
+					break
+				}
+			}
+		}
 	case Cmd_Level_Move:
 		level_load(gs, v.level_id, 0)
 
@@ -1238,6 +1337,39 @@ editor_command_execute :: proc(cmd: Cmd) {
 
 	recreate_colliders(gs.level.pos, &gs.colliders, gs.level.tiles[:])
 	autotile_run(gs.level)
+
+	// Respawn falling logs from spawns (with ceiling detection)
+	clear(&gs.falling_logs)
+	for spawn in gs.level.falling_log_spawns {
+		log_collider := rect_pos_add(spawn.rect, gs.level.pos)
+		log_center_x := log_collider.x + log_collider.width / 2
+
+		// Find ceiling above the log
+		rope_height: f32 = FALLING_LOG_ROPE_HEIGHT
+		ceiling_y: f32 = log_collider.y - 1000
+
+		for tile in gs.level.tiles {
+			tile_bottom := tile.pos.y + TILE_SIZE
+			if tile_bottom <= log_collider.y &&
+			   tile.pos.x <= log_center_x &&
+			   tile.pos.x + TILE_SIZE >= log_center_x {
+				if tile_bottom > ceiling_y {
+					ceiling_y = tile_bottom
+				}
+			}
+		}
+
+		if ceiling_y > log_collider.y - 1000 {
+			rope_height = log_collider.y - ceiling_y
+		}
+
+		append(&gs.falling_logs, Falling_Log {
+			collider    = log_collider,
+			rope_height = rope_height,
+			state       = .Default,
+		})
+	}
+
 	world_data_save()
 }
 

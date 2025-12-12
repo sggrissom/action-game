@@ -91,6 +91,24 @@ player_update :: proc(gs: ^Game_State, dt: f32) {
 		}
 	}
 
+	// Trigger falling logs when player is near rope
+	player_center := rect_center(player.collider)
+	for &falling_log in gs.falling_logs {
+		if falling_log.state != .Default do continue
+
+		log_center_x := falling_log.collider.x + falling_log.collider.width / 2
+		rope_rect := Rect {
+			log_center_x - 1,
+			falling_log.collider.y - falling_log.rope_height,
+			2,
+			falling_log.rope_height,
+		}
+
+		if rl.CheckCollisionCircleRec(player_center, FALLING_LOG_TRIGGER_RADIUS, rope_rect) {
+			falling_log.state = .Falling
+		}
+	}
+
 	{
 		overlap := rl.GetCollisionRec(
 			player.collider,

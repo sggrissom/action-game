@@ -32,6 +32,12 @@ ATTACK_RECOVERY_DURATION :: 0.2
 PLAYER_SAFE_RESET_TIME :: 1
 FIRST_LEVEL_ID :: 1
 
+FALLING_LOG_WIDTH :: 48
+FALLING_LOG_HEIGHT :: 32
+FALLING_LOG_ROPE_HEIGHT :: 64
+FALLING_LOG_SPEED :: 600
+FALLING_LOG_TRIGGER_RADIUS :: 25
+
 Vec2 :: rl.Vector2
 Vec4 :: rl.Vector4
 Rect :: rl.Rectangle
@@ -99,6 +105,18 @@ Falling_Log_Spawn :: struct {
 	rect: Rect,
 }
 
+Falling_Log_State :: enum {
+	Default,
+	Falling,
+	Settled,
+}
+
+Falling_Log :: struct {
+	collider:    Rect,
+	rope_height: f32,
+	state:       Falling_Log_State,
+}
+
 Checkpoint :: struct {
 	id:  u32,
 	pos: Vec2,
@@ -118,17 +136,18 @@ Door :: struct {
 }
 
 Level :: struct {
-	id:           u32,
-	pos:          Vec2,
-	size:         Vec2,
-	player_spawn: Maybe(Vec2),
-	name:         string,
-	enemy_spawns: [dynamic]Enemy_Spawn,
-	doors:        [dynamic]Door,
-	spikes:       [dynamic]Spike,
-	checkpoints:  [dynamic]Checkpoint,
-	tiles:        [dynamic]Tile,
-	on_enter:     proc(gs: ^Game_State),
+	id:                 u32,
+	pos:                Vec2,
+	size:               Vec2,
+	player_spawn:       Maybe(Vec2),
+	name:               string,
+	enemy_spawns:       [dynamic]Enemy_Spawn,
+	falling_log_spawns: [dynamic]Falling_Log_Spawn,
+	doors:              [dynamic]Door,
+	spikes:             [dynamic]Spike,
+	checkpoints:        [dynamic]Checkpoint,
+	tiles:              [dynamic]Tile,
+	on_enter:           proc(gs: ^Game_State),
 }
 
 Entity :: struct {
@@ -162,6 +181,7 @@ Game_State :: struct {
 	player_movement_state: Player_Movement_State,
 	camera:                rl.Camera2D,
 	entities:              [dynamic]Entity,
+	falling_logs:          [dynamic]Falling_Log,
 	debug_shapes:          [dynamic]Debug_Shape,
 	colliders:             [dynamic]Rect,
 	player_texture:        rl.Texture,
@@ -259,6 +279,41 @@ level_load :: proc(gs: ^Game_State, id: u32, player_spawn: Vec2) {
 
 	spawn_player(gs, player_spawn)
 	spawn_enemies(gs)
+
+	// Spawn falling logs from level spawns
+	clear(&gs.falling_logs)
+	for spawn in gs.level.falling_log_spawns {
+		log_collider := rect_pos_add(spawn.rect, level.pos)
+		log_center_x := log_collider.x + log_collider.width / 2
+
+		// Find ceiling above the log by checking tiles
+		rope_height: f32 = FALLING_LOG_ROPE_HEIGHT
+		ceiling_y: f32 = log_collider.y - 1000 // Default far above
+
+		for tile in level.tiles {
+			tile_bottom := tile.pos.y + TILE_SIZE
+			// Check if tile is above log and horizontally aligned
+			if tile_bottom <= log_collider.y &&
+			   tile.pos.x <= log_center_x &&
+			   tile.pos.x + TILE_SIZE >= log_center_x {
+				// Find the lowest ceiling (closest to the log)
+				if tile_bottom > ceiling_y {
+					ceiling_y = tile_bottom
+				}
+			}
+		}
+
+		// Calculate rope height from ceiling to log top
+		if ceiling_y > log_collider.y - 1000 {
+			rope_height = log_collider.y - ceiling_y
+		}
+
+		append(&gs.falling_logs, Falling_Log {
+			collider    = log_collider,
+			rope_height = rope_height,
+			state       = .Default,
+		})
+	}
 
 	if player_anim_name != "" {
 		player = entity_get(gs.player_id)
@@ -449,6 +504,27 @@ game_update :: proc(gs: ^Game_State) {
 			physics_update(gs.entities[:], gs.colliders[:], dt)
 			behavior_update(gs.entities[:], gs.colliders[:], dt)
 
+			// Update falling logs
+			for &falling_log in gs.falling_logs {
+				if falling_log.state == .Falling {
+					falling_log.collider.y += dt * FALLING_LOG_SPEED
+
+					// Check collision with ground
+					for collider in gs.colliders {
+						if rl.CheckCollisionRecs(collider, falling_log.collider) {
+							falling_log.state = .Settled
+							recreate_colliders(gs.level.pos, &gs.colliders, gs.level.tiles[:])
+							break
+						}
+					}
+
+					// Check collision with player (instant kill)
+					if rl.CheckCollisionRecs(player.collider, falling_log.collider) {
+						player.health = 0
+					}
+				}
+			}
+
 			{
 				render_half_size := Vec2{RENDER_WIDTH, RENDER_HEIGHT} / 2
 
@@ -538,6 +614,19 @@ game_update :: proc(gs: ^Game_State) {
 
 		for spike in gs.level.spikes {
 			rl.DrawRectangleLinesEx(rect_pos_add(spike.collider, gs.level.pos), 1, rl.YELLOW)
+		}
+
+		// Draw falling logs
+		for falling_log in gs.falling_logs {
+			// Draw rope if not settled
+			if falling_log.state != .Settled {
+				log_center_x := falling_log.collider.x + falling_log.collider.width / 2
+				rope_start := Vec2{log_center_x, falling_log.collider.y}
+				rope_end := Vec2{log_center_x, falling_log.collider.y - falling_log.rope_height}
+				rl.DrawLineV(rope_start, rope_end, rl.BROWN)
+			}
+			// Draw log
+			rl.DrawRectangleRec(falling_log.collider, rl.BROWN)
 		}
 
 		for &e in gs.entities {
@@ -681,6 +770,13 @@ recreate_colliders :: proc(world_pos: Vec2, colliders: ^[dynamic]Rect, tiles: []
 
 	if len(solid_tiles) > 0 {
 		combine_colliders(world_pos, solid_tiles[:], colliders)
+	}
+
+	// Add settled falling logs as colliders
+	for falling_log in gs.falling_logs {
+		if falling_log.state == .Settled {
+			append(colliders, falling_log.collider)
+		}
 	}
 }
 
