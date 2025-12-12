@@ -37,7 +37,7 @@ world_data_save :: proc() {
 	header := World_Data_Header {
 		magic         = HEADER_MAGIC,
 		version_major = 0,
-		version_minor = 2,
+		version_minor = 3,
 		version_patch = 0,
 		level_count   = u32(len(gs.levels)),
 		tileset_count = 0,
@@ -79,6 +79,23 @@ world_data_save :: proc() {
 			y := spawn.pos.y
 			bytes.buffer_write_ptr(&b, &x, size_of(f32))
 			bytes.buffer_write_ptr(&b, &y, size_of(f32))
+		}
+
+		// Write spikes
+		spike_count := u32(len(level.spikes))
+		bytes.buffer_write_ptr(&b, &spike_count, size_of(u32))
+
+		for spike in level.spikes {
+			facing := u8(spike.facing)
+			bytes.buffer_write_ptr(&b, &facing, size_of(u8))
+			x := spike.collider.x
+			y := spike.collider.y
+			w := spike.collider.width
+			h := spike.collider.height
+			bytes.buffer_write_ptr(&b, &x, size_of(f32))
+			bytes.buffer_write_ptr(&b, &y, size_of(f32))
+			bytes.buffer_write_ptr(&b, &w, size_of(f32))
+			bytes.buffer_write_ptr(&b, &h, size_of(f32))
 		}
 	}
 
@@ -147,6 +164,24 @@ world_data_load :: proc() {
 					&level.enemy_spawns,
 					Enemy_Spawn{type = Enemy_Type(enemy_type), pos = Vec2{x, y}},
 				)
+			}
+		}
+
+		// Read spikes (version 0.3+)
+		if header.version_minor >= 3 {
+			spike_count: u32
+			bytes.reader_read(&r, mem.any_to_bytes(spike_count))
+
+			for _ in 0 ..< spike_count {
+				facing: u8
+				x, y, w, h: f32
+				bytes.reader_read(&r, mem.any_to_bytes(facing))
+				bytes.reader_read(&r, mem.any_to_bytes(x))
+				bytes.reader_read(&r, mem.any_to_bytes(y))
+				bytes.reader_read(&r, mem.any_to_bytes(w))
+				bytes.reader_read(&r, mem.any_to_bytes(h))
+
+				append(&level.spikes, Spike{collider = {x, y, w, h}, facing = Direction(facing)})
 			}
 		}
 
