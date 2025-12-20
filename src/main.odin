@@ -2,6 +2,7 @@
 package main
 
 import "core:log"
+import "core:math"
 import "core:slice"
 import "core:strings"
 import "core:time"
@@ -180,6 +181,7 @@ Game_State :: struct {
 	safe_reset_timer:      f32,
 	player_movement_state: Player_Movement_State,
 	camera:                rl.Camera2D,
+	ui_camera:             rl.Camera2D,
 	entities:              [dynamic]Entity,
 	falling_logs:          [dynamic]Falling_Log,
 	debug_shapes:          [dynamic]Debug_Shape,
@@ -308,11 +310,10 @@ level_load :: proc(gs: ^Game_State, id: u32, player_spawn: Vec2) {
 			rope_height = log_collider.y - ceiling_y
 		}
 
-		append(&gs.falling_logs, Falling_Log {
-			collider    = log_collider,
-			rope_height = rope_height,
-			state       = .Default,
-		})
+		append(
+			&gs.falling_logs,
+			Falling_Log{collider = log_collider, rope_height = rope_height, state = .Default},
+		)
 	}
 
 	if player_anim_name != "" {
@@ -681,6 +682,34 @@ game_update :: proc(gs: ^Game_State) {
 		rl.EndMode2D()
 		rl.DrawFPS(10, 10)
 
+		rl.BeginMode2D(gs.ui_camera)
+
+		// Player health
+		{
+			full_hearts := player.health / 2
+			has_half_heart := f32(player.health) / 2 > f32(full_hearts)
+			empty_hearts := math.ceil(f32(player.max_health - player.health) / 2)
+
+			x := f32(16)
+
+			for _ in 0 ..< full_hearts {
+				rl.DrawTextureRec(gs.tileset_texture, {336, 176, 16, 16}, {x, 16}, rl.WHITE)
+				x += 16
+			}
+
+			if has_half_heart {
+				rl.DrawTextureRec(gs.tileset_texture, {336, 144, 16, 16}, {x, 16}, rl.WHITE)
+				x += 16
+			}
+
+			for _ in 0 ..< empty_hearts {
+				rl.DrawTextureRec(gs.tileset_texture, {336, 112, 16, 16}, {x, 16}, rl.WHITE)
+				x += 16
+			}
+		}
+
+		rl.EndMode2D()
+
 		if gs.editor_enabled {
 			editor_draw(gs)
 		}
@@ -862,6 +891,10 @@ main :: proc() {
 	gs.font_64 = rl.LoadFontEx("assets/fonts/Gogh-ExtraBold.ttf", 64, nil, 256)
 
 	gs.camera = rl.Camera2D {
+		zoom = ZOOM,
+	}
+
+	gs.ui_camera = rl.Camera2D {
 		zoom = ZOOM,
 	}
 
