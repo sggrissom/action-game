@@ -37,7 +37,7 @@ world_data_save :: proc() {
 	header := World_Data_Header {
 		magic         = HEADER_MAGIC,
 		version_major = 0,
-		version_minor = 4,
+		version_minor = 5,
 		version_patch = 0,
 		level_count   = u32(len(gs.levels)),
 		tileset_count = 0,
@@ -111,6 +111,19 @@ world_data_save :: proc() {
 			bytes.buffer_write_ptr(&b, &y, size_of(f32))
 			bytes.buffer_write_ptr(&b, &w, size_of(f32))
 			bytes.buffer_write_ptr(&b, &h, size_of(f32))
+		}
+
+		// Write checkpoints
+		checkpoint_count := u32(len(level.checkpoints))
+		bytes.buffer_write_ptr(&b, &checkpoint_count, size_of(u32))
+
+		for checkpoint in level.checkpoints {
+			id := checkpoint.id
+			x := checkpoint.pos.x
+			y := checkpoint.pos.y
+			bytes.buffer_write_ptr(&b, &id, size_of(u32))
+			bytes.buffer_write_ptr(&b, &x, size_of(f32))
+			bytes.buffer_write_ptr(&b, &y, size_of(f32))
 		}
 	}
 
@@ -213,6 +226,22 @@ world_data_load :: proc() {
 				bytes.reader_read(&r, mem.any_to_bytes(h))
 
 				append(&level.falling_log_spawns, Falling_Log_Spawn{rect = {x, y, w, h}})
+			}
+		}
+
+		// Read checkpoints (version 0.5+)
+		if header.version_minor >= 5 {
+			checkpoint_count: u32
+			bytes.reader_read(&r, mem.any_to_bytes(checkpoint_count))
+
+			for _ in 0 ..< checkpoint_count {
+				id: u32
+				x, y: f32
+				bytes.reader_read(&r, mem.any_to_bytes(id))
+				bytes.reader_read(&r, mem.any_to_bytes(x))
+				bytes.reader_read(&r, mem.any_to_bytes(y))
+
+				append(&level.checkpoints, Checkpoint{id = id, pos = {x, y}})
 			}
 		}
 

@@ -204,6 +204,7 @@ Game_State :: struct {
 	debug_draw_enabled:    bool,
 	attack_cooldown_timer: f32,
 	attack_recovery_timer: f32,
+	original_spawn_point:  Vec2,
 }
 
 Save_Data :: struct {
@@ -615,6 +616,10 @@ game_update :: proc(gs: ^Game_State) {
 
 		for spike in gs.level.spikes {
 			rl.DrawRectangleLinesEx(rect_pos_add(spike.collider, gs.level.pos), 1, rl.YELLOW)
+		}
+
+		for checkpoint in gs.level.checkpoints {
+			rl.DrawRectangleLinesEx(rect_from_pos_size(checkpoint.pos, 32), 1, rl.ORANGE)
 		}
 
 		// Draw falling logs

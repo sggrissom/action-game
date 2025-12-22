@@ -16,6 +16,11 @@ Player_Movement_State :: enum {
 player_update :: proc(gs: ^Game_State, dt: f32) {
 	player := entity_get(gs.player_id)
 
+	if player.health <= 0 {
+		player_on_death(player, gs)
+		return
+	}
+
 	input_x: f32
 	if rl.IsKeyDown(.D) do input_x += 1
 	if rl.IsKeyDown(.A) do input_x -= 1
@@ -52,6 +57,7 @@ player_update :: proc(gs: ^Game_State, dt: f32) {
 		try_run(gs, player)
 		try_jump(gs, player)
 		try_attack(gs, player)
+		try_activate_checkpoint(gs, player)
 	case .Run:
 		if input_x == 0 {
 			gs.player_movement_state = .Idle
@@ -161,6 +167,20 @@ try_attack :: proc(gs: ^Game_State, player: ^Entity) {
 	}
 }
 
+try_activate_checkpoint :: proc(gs: ^Game_State, player: ^Entity) {
+	if rl.IsKeyPressed(.W) {
+		for checkpoint in gs.level.checkpoints {
+			rect := rect_from_pos_size(checkpoint.pos, 32)
+
+			if rl.CheckCollisionRecs(rect, player.collider) {
+				gs.checkpoint_level_id = gs.level.id
+				gs.checkpoint_id = checkpoint.id
+				break
+			}
+		}
+	}
+}
+
 player_on_finish_attack :: proc(gs: ^Game_State, player: ^Entity) {
 	switch_animation(player, "idle")
 	gs.player_movement_state = .Attack_Cooldown
@@ -190,4 +210,31 @@ player_attack_callback :: proc(gs: ^Game_State, player: ^Entity) {
 			entity_hit(Entity_Id(i), dir * 500)
 		}
 	}
+}
+
+player_on_death :: proc(player: ^Entity, gs: ^Game_State) {
+	player := player
+	spawn_point := gs.original_spawn_point
+
+	if gs.checkpoint_level_id != 0 && gs.checkpoint_id != 0 {
+		if gs.checkpoint_level_id != gs.level.id {
+			level_load(gs, gs.checkpoint_level_id, 0)
+		}
+
+		for checkpoint in gs.level.checkpoints {
+			if checkpoint.id == gs.checkpoint_id {
+				spawn_point.x = checkpoint.pos.x
+				spawn_point.y = checkpoint.pos.y
+				break
+			}
+		}
+	} else {
+		level_load(gs, FIRST_LEVEL_ID, 0)
+	}
+
+	player = entity_get(gs.player_id)
+	player.health = player.max_health
+	player.flags -= {.Dead}
+	player.x = spawn_point.x
+	player.y = spawn_point.y
 }

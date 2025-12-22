@@ -18,6 +18,7 @@ Editor_Tool :: enum {
 	Spike,
 	Enemy,
 	Falling_Log,
+	Checkpoint,
 	Level,
 	Level_Resize,
 }
@@ -73,6 +74,8 @@ Cmd :: union {
 	Cmd_Enemies_Remove,
 	Cmd_Falling_Logs_Insert,
 	Cmd_Falling_Logs_Remove,
+	Cmd_Checkpoints_Insert,
+	Cmd_Checkpoints_Remove,
 	Cmd_Level_Move,
 	Cmd_Level_New,
 	Cmd_Level_Delete,
@@ -114,6 +117,14 @@ Cmd_Falling_Logs_Insert :: struct {
 
 Cmd_Falling_Logs_Remove :: struct {
 	spawns: []Falling_Log_Spawn,
+}
+
+Cmd_Checkpoints_Insert :: struct {
+	checkpoints: []Checkpoint,
+}
+
+Cmd_Checkpoints_Remove :: struct {
+	checkpoints: []Checkpoint,
 }
 
 Cmd_Level_Move :: struct {
@@ -372,6 +383,10 @@ editor_update :: proc(gs: ^Game_State, dt: f32) {
 			es.tool = .Falling_Log
 		}
 
+		if rl.IsKeyPressed(.C) {
+			es.tool = .Checkpoint
+		}
+
 		if rl.IsKeyPressed(.F) {
 			es.spike_orientation += Direction(1)
 			if int(es.spike_orientation) > 3 {
@@ -493,6 +508,20 @@ editor_update :: proc(gs: ^Game_State, dt: f32) {
 
 		if rl.IsMouseButtonReleased(.RIGHT) {
 			editor_command_dispatch(Cmd_Falling_Logs_Remove)
+		}
+
+	case .Checkpoint:
+		if rl.IsMouseButtonPressed(.LEFT) || rl.IsMouseButtonPressed(.RIGHT) {
+			es.area_begin = coords
+			es.area_end = coords
+		}
+
+		if rl.IsMouseButtonReleased(.LEFT) {
+			editor_command_dispatch(Cmd_Checkpoints_Insert)
+		}
+
+		if rl.IsMouseButtonReleased(.RIGHT) {
+			editor_command_dispatch(Cmd_Checkpoints_Remove)
 		}
 
 	case .Level:
@@ -709,6 +738,11 @@ editor_draw :: proc(gs: ^Game_State) {
 			2,
 			{139, 90, 43, 180},
 		)
+	}
+
+	// Draw checkpoints
+	for checkpoint in gs.level.checkpoints {
+		rl.DrawRectangleLinesEx(rect_from_pos_size(checkpoint.pos, 32), 2, rl.ORANGE)
 	}
 
 	rl.EndMode2D()
@@ -1079,6 +1113,56 @@ editor_command_construct :: proc(cmd_type: typeid) -> (cmd: Cmd_Entry, ok: bool)
 		}
 
 		return
+	case Cmd_Checkpoints_Insert:
+		// Use world position for checkpoint
+		world_pos := pos_from_coords(es.area_begin)
+
+		// Check if outside level bounds
+		level_rect := rect_from_pos_size(gs.level.pos, gs.level.size)
+		if !rl.CheckCollisionPointRec(world_pos, level_rect) {
+			return
+		}
+
+		// Check if checkpoint already exists at this position
+		for checkpoint in gs.level.checkpoints {
+			if checkpoint.pos == world_pos {
+				return
+			}
+		}
+
+		// Generate unique checkpoint ID
+		next_id: u32 = 1
+		for checkpoint in gs.level.checkpoints {
+			if checkpoint.id >= next_id {
+				next_id = checkpoint.id + 1
+			}
+		}
+
+		checkpoints := make([]Checkpoint, 1)
+		checkpoints[0] = Checkpoint{id = next_id, pos = world_pos}
+
+		forward := Cmd_Checkpoints_Insert{checkpoints = checkpoints}
+		inverse := Cmd_Checkpoints_Remove{checkpoints = checkpoints}
+
+		return {forward, inverse}, true
+	case Cmd_Checkpoints_Remove:
+		world_pos := pos_from_coords(es.area_begin)
+
+		// Find checkpoint at this position (32x32 area)
+		for checkpoint in gs.level.checkpoints {
+			rect := rect_from_pos_size(checkpoint.pos, 32)
+			if rl.CheckCollisionPointRec(world_pos, rect) {
+				checkpoints := make([]Checkpoint, 1)
+				checkpoints[0] = checkpoint
+
+				forward := Cmd_Checkpoints_Remove{checkpoints = checkpoints}
+				inverse := Cmd_Checkpoints_Insert{checkpoints = checkpoints}
+
+				return {forward, inverse}, true
+			}
+		}
+
+		return
 	case Cmd_Level_Move:
 		forward := Cmd_Level_Move {
 			level_id = gs.level.id,
@@ -1256,6 +1340,19 @@ editor_command_execute :: proc(cmd: Cmd) {
 			for s, i in gs.level.falling_log_spawns {
 				if s.rect.x == spawn.rect.x && s.rect.y == spawn.rect.y {
 					unordered_remove(&gs.level.falling_log_spawns, i)
+					break
+				}
+			}
+		}
+	case Cmd_Checkpoints_Insert:
+		for checkpoint in v.checkpoints {
+			append(&gs.level.checkpoints, checkpoint)
+		}
+	case Cmd_Checkpoints_Remove:
+		for checkpoint in v.checkpoints {
+			for c, i in gs.level.checkpoints {
+				if c.id == checkpoint.id {
+					unordered_remove(&gs.level.checkpoints, i)
 					break
 				}
 			}
