@@ -12,9 +12,11 @@ physics_update :: proc(entities: []Entity, static_colliders: []Rect, dt: f32) {
 		if .Kinematic not_in entity.flags {
 			for _ in 0 ..< PHYSICS_ITERATIONS {
 				step := dt / PHYSICS_ITERATIONS
-				entity.vel.y += GRAVITY
-				if entity.vel.y > TERMINAL_VELOCITY {
-					entity.vel.y = TERMINAL_VELOCITY
+				if .Dashing not_in entity.flags {
+					entity.vel.y += GRAVITY
+					if entity.vel.y > TERMINAL_VELOCITY {
+						entity.vel.y = TERMINAL_VELOCITY
+					}
 				}
 
 				// Y axis

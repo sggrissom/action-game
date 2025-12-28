@@ -37,7 +37,7 @@ world_data_save :: proc() {
 	header := World_Data_Header {
 		magic         = HEADER_MAGIC,
 		version_major = 0,
-		version_minor = 5,
+		version_minor = 6,
 		version_patch = 0,
 		level_count   = u32(len(gs.levels)),
 		tileset_count = 0,
@@ -122,6 +122,19 @@ world_data_save :: proc() {
 			x := checkpoint.pos.x
 			y := checkpoint.pos.y
 			bytes.buffer_write_ptr(&b, &id, size_of(u32))
+			bytes.buffer_write_ptr(&b, &x, size_of(f32))
+			bytes.buffer_write_ptr(&b, &y, size_of(f32))
+		}
+
+		// Write powerups
+		power_up_count := u32(len(level.power_ups))
+		bytes.buffer_write_ptr(&b, &power_up_count, size_of(u32))
+
+		for pu in level.power_ups {
+			pu_type := u8(pu.type)
+			x := pu.x
+			y := pu.y
+			bytes.buffer_write_ptr(&b, &pu_type, size_of(u8))
 			bytes.buffer_write_ptr(&b, &x, size_of(f32))
 			bytes.buffer_write_ptr(&b, &y, size_of(f32))
 		}
@@ -242,6 +255,22 @@ world_data_load :: proc() {
 				bytes.reader_read(&r, mem.any_to_bytes(y))
 
 				append(&level.checkpoints, Checkpoint{id = id, pos = {x, y}})
+			}
+		}
+
+		// Read powerups (version 0.6+)
+		if header.version_minor >= 6 {
+			power_up_count: u32
+			bytes.reader_read(&r, mem.any_to_bytes(power_up_count))
+
+			for _ in 0 ..< power_up_count {
+				pu_type: u8
+				x, y: f32
+				bytes.reader_read(&r, mem.any_to_bytes(pu_type))
+				bytes.reader_read(&r, mem.any_to_bytes(x))
+				bytes.reader_read(&r, mem.any_to_bytes(y))
+
+				append(&level.power_ups, Power_Up{position = {x, y}, type = Power_Up_Type(pu_type)})
 			}
 		}
 

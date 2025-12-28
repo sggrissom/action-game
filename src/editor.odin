@@ -19,6 +19,7 @@ Editor_Tool :: enum {
 	Enemy,
 	Falling_Log,
 	Checkpoint,
+	Power_Up,
 	Level,
 	Level_Resize,
 }
@@ -76,6 +77,8 @@ Cmd :: union {
 	Cmd_Falling_Logs_Remove,
 	Cmd_Checkpoints_Insert,
 	Cmd_Checkpoints_Remove,
+	Cmd_Power_Ups_Insert,
+	Cmd_Power_Ups_Remove,
 	Cmd_Level_Move,
 	Cmd_Level_New,
 	Cmd_Level_Delete,
@@ -125,6 +128,14 @@ Cmd_Checkpoints_Insert :: struct {
 
 Cmd_Checkpoints_Remove :: struct {
 	checkpoints: []Checkpoint,
+}
+
+Cmd_Power_Ups_Insert :: struct {
+	power_ups: []Power_Up,
+}
+
+Cmd_Power_Ups_Remove :: struct {
+	power_ups: []Power_Up,
 }
 
 Cmd_Level_Move :: struct {
@@ -387,6 +398,10 @@ editor_update :: proc(gs: ^Game_State, dt: f32) {
 			es.tool = .Checkpoint
 		}
 
+		if rl.IsKeyPressed(.P) {
+			es.tool = .Power_Up
+		}
+
 		if rl.IsKeyPressed(.F) {
 			es.spike_orientation += Direction(1)
 			if int(es.spike_orientation) > 3 {
@@ -522,6 +537,20 @@ editor_update :: proc(gs: ^Game_State, dt: f32) {
 
 		if rl.IsMouseButtonReleased(.RIGHT) {
 			editor_command_dispatch(Cmd_Checkpoints_Remove)
+		}
+
+	case .Power_Up:
+		if rl.IsMouseButtonPressed(.LEFT) || rl.IsMouseButtonPressed(.RIGHT) {
+			es.area_begin = coords
+			es.area_end = coords
+		}
+
+		if rl.IsMouseButtonReleased(.LEFT) {
+			editor_command_dispatch(Cmd_Power_Ups_Insert)
+		}
+
+		if rl.IsMouseButtonReleased(.RIGHT) {
+			editor_command_dispatch(Cmd_Power_Ups_Remove)
 		}
 
 	case .Level:
@@ -743,6 +772,12 @@ editor_draw :: proc(gs: ^Game_State) {
 	// Draw checkpoints
 	for checkpoint in gs.level.checkpoints {
 		rl.DrawRectangleLinesEx(rect_from_pos_size(checkpoint.pos, 32), 2, rl.ORANGE)
+	}
+
+	// Draw powerups
+	for pu in gs.level.power_ups {
+		rl.DrawCircleV(pu.position, 8, rl.BLUE)
+		rl.DrawCircleLinesV(pu.position, 8, rl.WHITE)
 	}
 
 	rl.EndMode2D()
@@ -1163,6 +1198,47 @@ editor_command_construct :: proc(cmd_type: typeid) -> (cmd: Cmd_Entry, ok: bool)
 		}
 
 		return
+	case Cmd_Power_Ups_Insert:
+		world_pos := pos_from_coords(es.area_begin)
+
+		// Check if outside level bounds
+		level_rect := rect_from_pos_size(gs.level.pos, gs.level.size)
+		if !rl.CheckCollisionPointRec(world_pos, level_rect) {
+			return
+		}
+
+		// Check if powerup already exists at this position
+		for pu in gs.level.power_ups {
+			if pu.position == world_pos {
+				return
+			}
+		}
+
+		power_ups := make([]Power_Up, 1)
+		power_ups[0] = Power_Up{position = world_pos, type = .Dash}
+
+		forward := Cmd_Power_Ups_Insert{power_ups = power_ups}
+		inverse := Cmd_Power_Ups_Remove{power_ups = power_ups}
+
+		return {forward, inverse}, true
+	case Cmd_Power_Ups_Remove:
+		world_pos := pos_from_coords(es.area_begin)
+
+		// Find powerup at this position
+		for pu in gs.level.power_ups {
+			rect := Rect{pu.x - 8, pu.y - 8, 16, 16}
+			if rl.CheckCollisionPointRec(world_pos, rect) {
+				power_ups := make([]Power_Up, 1)
+				power_ups[0] = pu
+
+				forward := Cmd_Power_Ups_Remove{power_ups = power_ups}
+				inverse := Cmd_Power_Ups_Insert{power_ups = power_ups}
+
+				return {forward, inverse}, true
+			}
+		}
+
+		return
 	case Cmd_Level_Move:
 		forward := Cmd_Level_Move {
 			level_id = gs.level.id,
@@ -1353,6 +1429,19 @@ editor_command_execute :: proc(cmd: Cmd) {
 			for c, i in gs.level.checkpoints {
 				if c.id == checkpoint.id {
 					unordered_remove(&gs.level.checkpoints, i)
+					break
+				}
+			}
+		}
+	case Cmd_Power_Ups_Insert:
+		for pu in v.power_ups {
+			append(&gs.level.power_ups, pu)
+		}
+	case Cmd_Power_Ups_Remove:
+		for pu in v.power_ups {
+			for p, i in gs.level.power_ups {
+				if p.position == pu.position && p.type == pu.type {
+					unordered_remove(&gs.level.power_ups, i)
 					break
 				}
 			}

@@ -11,6 +11,7 @@ Player_Movement_State :: enum {
 	Run,
 	Jump,
 	Fall,
+	Dash,
 }
 
 player_update :: proc(gs: ^Game_State, dt: f32) {
@@ -25,9 +26,11 @@ player_update :: proc(gs: ^Game_State, dt: f32) {
 	if rl.IsKeyDown(.D) do input_x += 1
 	if rl.IsKeyDown(.A) do input_x -= 1
 
-	player.vel.x = input_x * player.move_speed
-	if player.vel.x > 0 do player.flags -= {.Left}
-	if player.vel.x < 0 do player.flags += {.Left}
+	if gs.player_movement_state != .Dash {
+		player.vel.x = input_x * player.move_speed
+		if player.vel.x > 0 do player.flags -= {.Left}
+		if player.vel.x < 0 do player.flags += {.Left}
+	}
 
 	if gs.attack_recovery_timer > 0 {
 		gs.attack_recovery_timer -= dt
@@ -36,6 +39,7 @@ player_update :: proc(gs: ^Game_State, dt: f32) {
 
 	gs.jump_timer -= dt
 	gs.coyote_timer -= dt
+	if gs.dash_cooldown_timer > 0 do gs.dash_cooldown_timer -= dt
 
 	switch gs.player_movement_state {
 	case .Uncontrollable:
@@ -58,6 +62,7 @@ player_update :: proc(gs: ^Game_State, dt: f32) {
 		try_jump(gs, player)
 		try_attack(gs, player)
 		try_activate_checkpoint(gs, player)
+		try_dash(gs, player)
 	case .Run:
 		if input_x == 0 {
 			gs.player_movement_state = .Idle
@@ -65,6 +70,7 @@ player_update :: proc(gs: ^Game_State, dt: f32) {
 		}
 		try_jump(gs, player)
 		try_attack(gs, player)
+		try_dash(gs, player)
 	case .Jump:
 		if rl.IsKeyReleased(.SPACE) {
 			player.vel.y *= 0.5
@@ -76,12 +82,22 @@ player_update :: proc(gs: ^Game_State, dt: f32) {
 			switch_animation(player, "fall")
 		}
 		try_attack(gs, player)
+		try_dash(gs, player)
 	case .Fall:
 		if .Grounded in player.flags {
 			gs.player_movement_state = .Idle
 			switch_animation(player, "idle")
 		}
 		try_attack(gs, player)
+		try_dash(gs, player)
+	case .Dash:
+		gs.dash_timer -= dt
+		if gs.dash_timer <= 0 {
+			gs.dash_cooldown_timer = DASH_COOLDOWN
+			player.flags -= {.Dashing}
+			gs.player_movement_state = .Fall
+			switch_animation(player, "fall")
+		}
 	}
 
 	// Spike collision - reset to safe position
@@ -93,6 +109,16 @@ player_update :: proc(gs: ^Game_State, dt: f32) {
 			gs.safe_reset_timer = PLAYER_SAFE_RESET_TIME
 			gs.player_movement_state = .Uncontrollable
 			switch_animation(player, "idle")
+			break
+		}
+	}
+
+	// Powerup collection
+	for pu, i in gs.level.power_ups {
+		rect := Rect{pu.x - 8, pu.y - 8, 16, 16}
+		if rl.CheckCollisionRecs(player.collider, rect) {
+			gs.collected_power_ups += {pu.type}
+			ordered_remove(&gs.level.power_ups, i)
 			break
 		}
 	}
@@ -179,6 +205,32 @@ try_activate_checkpoint :: proc(gs: ^Game_State, player: ^Entity) {
 			}
 		}
 	}
+}
+
+try_dash :: proc(gs: ^Game_State, player: ^Entity) {
+	if .Dash not_in gs.collected_power_ups do return
+	if gs.dash_cooldown_timer > 0 do return
+	if !rl.IsMouseButtonPressed(.RIGHT) do return
+
+	input_dir: Vec2
+	if rl.IsKeyDown(.W) do input_dir.y -= 1
+	if rl.IsKeyDown(.S) do input_dir.y += 1
+	if rl.IsKeyDown(.A) do input_dir.x -= 1
+	if rl.IsKeyDown(.D) do input_dir.x += 1
+
+	if input_dir == {0, 0} {
+		input_dir.x = .Left in player.flags ? -1 : 1
+	}
+
+	if input_dir.x != 0 && input_dir.y != 0 {
+		input_dir = linalg.normalize(input_dir)
+	}
+
+	player.vel = input_dir * DASH_VELOCITY
+	player.flags += {.Dashing}
+	gs.dash_timer = DASH_DURATION
+	gs.player_movement_state = .Dash
+	switch_animation(player, "dash")
 }
 
 player_on_finish_attack :: proc(gs: ^Game_State, player: ^Entity) {

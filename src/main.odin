@@ -29,6 +29,9 @@ JUMP_TIME :: 0.2
 COYOTE_TIME :: 0.15
 ATTACK_COOLDOWN_DURATION :: 0.3
 ATTACK_RECOVERY_DURATION :: 0.2
+DASH_DURATION :: 0.3
+DASH_COOLDOWN :: 1
+DASH_VELOCITY :: 500
 
 PLAYER_SAFE_RESET_TIME :: 1
 FIRST_LEVEL_ID :: 1
@@ -53,6 +56,7 @@ Entity_Flags :: enum {
 	Left,
 	Immortal,
 	Frozen,
+	Dashing,
 }
 
 Entity_Behaviors :: enum {
@@ -148,6 +152,7 @@ Level :: struct {
 	spikes:             [dynamic]Spike,
 	checkpoints:        [dynamic]Checkpoint,
 	tiles:              [dynamic]Tile,
+	power_ups:          [dynamic]Power_Up,
 	on_enter:           proc(gs: ^Game_State),
 }
 
@@ -205,6 +210,10 @@ Game_State :: struct {
 	attack_cooldown_timer: f32,
 	attack_recovery_timer: f32,
 	original_spawn_point:  Vec2,
+	power_ups:             [dynamic]Power_Up,
+	collected_power_ups:   bit_set[Power_Up_Type],
+	dash_timer:            f32,
+	dash_cooldown_timer:   f32,
 }
 
 Save_Data :: struct {
@@ -249,6 +258,11 @@ Enemy_Def :: struct {
 	hit_response:        Entity_Hit_Response,
 	hit_duration:        f32,
 	hit_knockback_force: f32,
+}
+
+Power_Up :: struct {
+	using position: Vec2,
+	type:           Power_Up_Type,
 }
 
 player_on_enter :: proc(self_id, other_id: Entity_Id) {
@@ -620,6 +634,12 @@ game_update :: proc(gs: ^Game_State) {
 
 		for checkpoint in gs.level.checkpoints {
 			rl.DrawRectangleLinesEx(rect_from_pos_size(checkpoint.pos, 32), 1, rl.ORANGE)
+		}
+
+		// Draw powerups
+		for pu in gs.level.power_ups {
+			rl.DrawCircleV(pu.position, 8, rl.BLUE)
+			rl.DrawCircleLinesV(pu.position, 8, rl.WHITE)
 		}
 
 		// Draw falling logs
