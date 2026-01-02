@@ -59,6 +59,7 @@ Editor_State :: struct {
 	command_history:   [dynamic]Cmd_Entry,
 	undo_count:        int,
 	spike_orientation: Direction,
+	enemy_type:        Enemy_Type,
 	tileset:           Tileset,
 	is_dragging:       bool,
 	drag_start:        Vec2,
@@ -406,6 +407,13 @@ editor_update :: proc(gs: ^Game_State, dt: f32) {
 			es.spike_orientation += Direction(1)
 			if int(es.spike_orientation) > 3 {
 				es.spike_orientation = Direction(0)
+			}
+		}
+
+		if rl.IsKeyPressed(.R) {
+			es.enemy_type += Enemy_Type(1)
+			if int(es.enemy_type) > int(Enemy_Type.Jumper) {
+				es.enemy_type = Enemy_Type(0)
 			}
 		}
 
@@ -794,6 +802,7 @@ editor_draw :: proc(gs: ^Game_State) {
 		),
 	)
 	editor_panel_text(fmt.ctprintf("Orientation: %v", es.spike_orientation))
+	editor_panel_text(fmt.ctprintf("Enemy Type: %v", es.enemy_type))
 	editor_panel_text(fmt.ctprintf("Camera Zoom: %v", gs.camera.zoom))
 
 	level_pos_tiles := coords_from_pos(gs.level.pos)
@@ -1081,7 +1090,7 @@ editor_command_construct :: proc(cmd_type: typeid) -> (cmd: Cmd_Entry, ok: bool)
 		}
 
 		spawns := make([]Enemy_Spawn, 1)
-		spawns[0] = Enemy_Spawn{type = .Walker, pos = pos}
+		spawns[0] = Enemy_Spawn{type = es.enemy_type, pos = pos}
 
 		forward := Cmd_Enemies_Insert{spawns = spawns}
 		inverse := Cmd_Enemies_Remove{spawns = spawns}

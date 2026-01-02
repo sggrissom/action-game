@@ -1,5 +1,7 @@
 package main
 
+import "core:math/rand"
+
 behavior_update :: proc(entities: []Entity, static_colliders: []Rect, dt: f32) {
 	for &e in entities {
 		if .Dead in e.flags do continue
@@ -50,6 +52,20 @@ behavior_update :: proc(entities: []Entity, static_colliders: []Rect, dt: f32) {
 					e.vel.x = 0
 				}
 
+			}
+		}
+
+		if .Hop in e.behaviors {
+			e.hop_timer -= dt
+
+			if e.hop_timer <= 0 && .Grounded in e.flags {
+				// Hop in facing direction
+				direction: f32 = .Left in e.flags ? -1.0 : 1.0
+				e.vel.x = direction * HOP_HORIZONTAL_SPEED
+				e.vel.y = UP.y * HOP_FORCE
+
+				// Reset timer with random interval
+				e.hop_timer = rand.float32_range(HOP_INTERVAL_MIN, HOP_INTERVAL_MAX)
 			}
 		}
 	}

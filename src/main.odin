@@ -33,6 +33,11 @@ DASH_DURATION :: 0.3
 DASH_COOLDOWN :: 1
 DASH_VELOCITY :: 500
 
+HOP_FORCE :: 400
+HOP_HORIZONTAL_SPEED :: 80
+HOP_INTERVAL_MIN :: 1.0
+HOP_INTERVAL_MAX :: 2.5
+
 PLAYER_SAFE_RESET_TIME :: 1
 FIRST_LEVEL_ID :: 1
 
@@ -63,6 +68,7 @@ Entity_Behaviors :: enum {
 	Walk,
 	Flip_At_Wall,
 	Flip_At_Edge,
+	Hop,
 }
 
 Direction :: enum {
@@ -178,6 +184,7 @@ Entity :: struct {
 	hit_timer:                  f32,
 	hit_duration:               f32,
 	hit_response:               Entity_Hit_Response,
+	hop_timer:                  f32,
 }
 
 Game_State :: struct {
@@ -903,6 +910,28 @@ main :: proc() {
 		},
 		initial_animation = "walk",
 		hit_response = .Stop,
+		hit_duration = 0.25,
+	}
+
+	gs.enemy_definitions[.Jumper] = Enemy_Def {
+		collider_size = {32, 32},
+		move_speed = 0,
+		health = 2,
+		behaviors = {.Hop, .Flip_At_Wall, .Flip_At_Edge},
+		on_hit_damage = 1,
+		texture = rl.LoadTexture("assets/textures/bunny_50x48.png"),
+		animations = {
+			"idle" = Animation {
+				size = {50, 48},
+				offset = {9, 16},
+				start = 0,
+				end = 0,
+				time = 0.15,
+				flags = {.Loop},
+			},
+		},
+		initial_animation = "idle",
+		hit_response = .Knockback,
 		hit_duration = 0.25,
 	}
 
