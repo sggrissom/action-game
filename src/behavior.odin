@@ -1,5 +1,6 @@
 package main
 
+import "core:math"
 import "core:math/rand"
 
 behavior_update :: proc(entities: []Entity, static_colliders: []Rect, dt: f32) {
@@ -66,6 +67,50 @@ behavior_update :: proc(entities: []Entity, static_colliders: []Rect, dt: f32) {
 
 				// Reset timer with random interval
 				e.hop_timer = rand.float32_range(HOP_INTERVAL_MIN, HOP_INTERVAL_MAX)
+			}
+		}
+
+		if .Charge_At_Player in e.behaviors {
+			if e.is_charging {
+				e.charge_timer -= dt
+				if e.charge_timer <= 0 {
+					e.is_charging = false
+					e.charge_cooldown_timer = CHARGE_COOLDOWN
+				}
+			} else {
+				e.charge_cooldown_timer -= dt
+
+				// Check if player in range
+				if e.charge_cooldown_timer <= 0 {
+					player := entity_get(gs.player_id)
+					if player != nil {
+						player_center := Vec2{player.x + player.width / 2, player.y + player.height / 2}
+						enemy_center := Vec2{e.x + e.width / 2, e.y + e.height / 2}
+						dx := player_center.x - enemy_center.x
+						dy := player_center.y - enemy_center.y
+						dist := math.sqrt(dx * dx + dy * dy)
+
+						if dist < CHARGE_DETECTION_RANGE {
+							e.is_charging = true
+							e.charge_timer = CHARGE_DURATION
+							// Face toward player
+							if dx < 0 {
+								e.flags += {.Left}
+							} else {
+								e.flags -= {.Left}
+							}
+						}
+					}
+				}
+			}
+
+			// Override walk speed when charging
+			if e.is_charging {
+				if .Left in e.flags {
+					e.vel.x = -CHARGE_SPEED
+				} else {
+					e.vel.x = CHARGE_SPEED
+				}
 			}
 		}
 	}

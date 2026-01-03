@@ -38,6 +38,11 @@ HOP_HORIZONTAL_SPEED :: 80
 HOP_INTERVAL_MIN :: 1.0
 HOP_INTERVAL_MAX :: 2.5
 
+CHARGE_DETECTION_RANGE :: 200
+CHARGE_SPEED :: 300
+CHARGE_DURATION :: 0.35
+CHARGE_COOLDOWN :: 2.0
+
 PLAYER_SAFE_RESET_TIME :: 1
 FIRST_LEVEL_ID :: 1
 
@@ -69,6 +74,7 @@ Entity_Behaviors :: enum {
 	Flip_At_Wall,
 	Flip_At_Edge,
 	Hop,
+	Charge_At_Player,
 }
 
 Direction :: enum {
@@ -185,6 +191,9 @@ Entity :: struct {
 	hit_duration:               f32,
 	hit_response:               Entity_Hit_Response,
 	hop_timer:                  f32,
+	charge_timer:               f32,
+	charge_cooldown_timer:      f32,
+	is_charging:                bool,
 }
 
 Game_State :: struct {
@@ -932,6 +941,28 @@ main :: proc() {
 		},
 		initial_animation = "idle",
 		hit_response = .Knockback,
+		hit_duration = 0.25,
+	}
+
+	gs.enemy_definitions[.Charger] = Enemy_Def {
+		collider_size = {64, 35},
+		move_speed = 25,
+		health = 3,
+		behaviors = {.Walk, .Flip_At_Wall, .Flip_At_Edge, .Charge_At_Player},
+		on_hit_damage = 2,
+		texture = rl.LoadTexture("assets/textures/pig_64x35.png"),
+		animations = {
+			"walk" = Animation {
+				size = {64, 35},
+				offset = {0, 0},
+				start = 0,
+				end = 3,
+				time = 0.125,
+				flags = {.Loop},
+			},
+		},
+		initial_animation = "walk",
+		hit_response = .Stop,
 		hit_duration = 0.25,
 	}
 

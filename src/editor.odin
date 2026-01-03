@@ -412,7 +412,7 @@ editor_update :: proc(gs: ^Game_State, dt: f32) {
 
 		if rl.IsKeyPressed(.R) {
 			es.enemy_type += Enemy_Type(1)
-			if int(es.enemy_type) > int(Enemy_Type.Jumper) {
+			if int(es.enemy_type) > int(Enemy_Type.Charger) {
 				es.enemy_type = Enemy_Type(0)
 			}
 		}
