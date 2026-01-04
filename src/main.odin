@@ -1,8 +1,10 @@
 #+feature dynamic-literals
 package main
 
+import "core:fmt"
 import "core:log"
 import "core:math"
+import "core:os"
 import "core:slice"
 import "core:strings"
 import "core:time"
@@ -45,6 +47,12 @@ CHARGE_COOLDOWN :: 2.0
 
 PLAYER_SAFE_RESET_TIME :: 1
 FIRST_LEVEL_ID :: 1
+
+SAVE_SLOTS :: 10
+SAVE_ITEM_HEIGHT :: 60
+SAVE_PANEL_WIDTH :: WINDOW_WIDTH / 2
+SAVE_PANEL_HEIGHT :: WINDOW_HEIGHT / 3
+SCROLL_SPEED :: 20
 
 FALLING_LOG_WIDTH :: 48
 FALLING_LOG_HEIGHT :: 32
@@ -230,12 +238,31 @@ Game_State :: struct {
 	collected_power_ups:   bit_set[Power_Up_Type],
 	dash_timer:            f32,
 	dash_cooldown_timer:   f32,
+	save_data:             Save_Data,
+	last_update_time:      time.Time,
+	main_menu_state:       Main_Menu_State,
 }
 
 Save_Data :: struct {
-	level_id:          u32,
-	checkpoint_id:     u32,
-	visited_level_ids: [dynamic]u32,
+	slot:               int,
+	level_id:           u32,
+	checkpoint_id:      u32,
+	seconds_played:     f64,
+	location:           string,
+	visited_level_ids:  [dynamic]u32,
+	collected_power_ups: bit_set[Power_Up_Type],
+}
+
+Main_Menu_Type :: enum {
+	Default,
+	Select_Save_Slot,
+}
+
+Main_Menu_State :: struct {
+	menu_type:               Main_Menu_Type,
+	save_texture:            rl.RenderTexture2D,
+	save_slots:              [SAVE_SLOTS]Save_Data,
+	save_list_scroll_offset: f32,
 }
 
 Animation :: struct {
@@ -762,13 +789,15 @@ game_update :: proc(gs: ^Game_State) {
 }
 
 main_menu_update :: proc(gs: ^Game_State) {
+	BG_COLOR_MAIN_MENU :: rl.Color{0, 0, 28, 255}
+
 	for !rl.WindowShouldClose() {
 		center := Vec2{WINDOW_WIDTH, WINDOW_HEIGHT} / 2
 		title_text: cstring = "Action Game Thing"
 		title_text_size := rl.MeasureTextEx(gs.font_64, title_text, 64, 4)
 
 		rl.BeginDrawing()
-		rl.ClearBackground({0, 0, 28, 255})
+		rl.ClearBackground(BG_COLOR_MAIN_MENU)
 
 		rl.DrawTextEx(
 			gs.font_64,
@@ -779,22 +808,109 @@ main_menu_update :: proc(gs: ^Game_State) {
 			rl.WHITE,
 		)
 
-		if main_menu_item_draw("Continue", center, rl.DARKGRAY, rl.DARKGRAY) {
-			// TODO
-		}
+		switch gs.main_menu_state.menu_type {
+		case .Default:
+			if main_menu_item_draw("Play", center) {
+				gs.main_menu_state.menu_type = .Select_Save_Slot
+			}
 
-		if main_menu_item_draw("New Game", center + {0, 60}) {
-			game_init(gs)
-			level_load(gs, FIRST_LEVEL_ID, 0)
-			return
-		}
+			if main_menu_item_draw("Quit", center + {0, 60}) {
+				rl.CloseWindow()
+				return
+			}
+		case .Select_Save_Slot:
+			// Render scrollable save slot list to texture
+			target := gs.main_menu_state.save_texture
+			panel_pos := Vec2{(WINDOW_WIDTH - SAVE_PANEL_WIDTH) / 2, WINDOW_HEIGHT / 2}
 
-		if main_menu_item_draw("Quit", center + {0, 120}) {
-			rl.CloseWindow()
-			return
+			mouse_wheel_move := rl.GetMouseWheelMove()
+			gs.main_menu_state.save_list_scroll_offset = clamp(
+				gs.main_menu_state.save_list_scroll_offset + mouse_wheel_move * SCROLL_SPEED,
+				SAVE_PANEL_HEIGHT - SAVE_ITEM_HEIGHT * SAVE_SLOTS,
+				0,
+			)
+
+			rl.BeginTextureMode(target)
+			rl.ClearBackground(BG_COLOR_MAIN_MENU)
+
+			for save_data, i in gs.main_menu_state.save_slots {
+				if save_data.seconds_played > 0 {
+					// Save file exists
+					if load_game_item_draw(
+						i,
+						panel_pos,
+						gs.main_menu_state.save_list_scroll_offset,
+						save_data.location,
+						save_data.seconds_played,
+					) {
+						gs.save_data = save_data
+						gs.collected_power_ups = save_data.collected_power_ups
+						gs.checkpoint_level_id = save_data.level_id
+						gs.checkpoint_id = save_data.checkpoint_id
+						gs.last_update_time = time.now()
+						game_init(gs)
+
+						level := level_from_id(gs.levels[:], gs.save_data.level_id)
+						if level == nil {
+							gs.save_data.level_id = FIRST_LEVEL_ID
+						}
+
+						level_load(gs, gs.save_data.level_id, 0)
+
+						// Find and set player to checkpoint position
+						for checkpoint in gs.level.checkpoints {
+							if checkpoint.id == save_data.checkpoint_id {
+								player := entity_get(gs.player_id)
+								player.x = checkpoint.pos.x
+								player.y = checkpoint.pos.y
+								break
+							}
+						}
+					}
+				} else {
+					// New game slot
+					if load_game_item_draw(i, panel_pos, gs.main_menu_state.save_list_scroll_offset) {
+						game_init(gs)
+
+						gs.save_data.slot = i
+						gs.last_update_time = time.now()
+
+						level_load(gs, FIRST_LEVEL_ID, 0)
+					}
+				}
+			}
+
+			rl.EndTextureMode()
+
+			// Draw the scrollable panel onto the screen
+			rl.DrawTextureRec(
+				gs.main_menu_state.save_texture.texture,
+				Rect {
+					0,
+					gs.main_menu_state.save_list_scroll_offset - SAVE_PANEL_HEIGHT,
+					SAVE_PANEL_WIDTH,
+					-SAVE_PANEL_HEIGHT,
+				},
+				panel_pos,
+				rl.WHITE,
+			)
+
+			// Back button
+			{
+				text :: "Back"
+				size := rl.MeasureTextEx(gs.font_48, text, 48, 0)
+				if main_menu_item_draw(text, {32 + size.x / 2, WINDOW_HEIGHT - 60}) {
+					gs.main_menu_state.menu_type = .Default
+				}
+			}
 		}
 
 		rl.EndDrawing()
+
+		// Scene changed, return to switch scenes
+		if gs.scene != .Main_Menu {
+			return
+		}
 	}
 }
 
@@ -818,6 +934,42 @@ main_menu_item_draw :: proc(
 		}
 	} else {
 		rl.DrawTextEx(gs.font_48, text, pos, 48, 0, color)
+	}
+
+	return
+}
+
+load_game_item_draw :: proc(
+	slot: int,
+	panel_pos: Vec2,
+	offset: f32,
+	location: string = "",
+	time_played: f64 = 0,
+) -> (
+	pressed: bool,
+) {
+	text: cstring
+	if time_played == 0 {
+		text = "New Game"
+	} else {
+		dur := time.Duration(i64(time_played * 1000 * 1000 * 1000))
+		buf: [time.MIN_HMS_LEN]u8
+		time_played_str := time.to_string_hms(dur, buf[:])
+		text = fmt.ctprintf("%d - %s, %s", slot + 1, location, time_played_str)
+	}
+
+	pos := Vec2{0, f32(slot) * SAVE_ITEM_HEIGHT}
+	mouse_pos := rl.GetMousePosition()
+
+	screen_pos := panel_pos + {0, pos.y + offset}
+
+	if rl.CheckCollisionPointRec(mouse_pos, {screen_pos.x, screen_pos.y, SAVE_PANEL_WIDTH, SAVE_ITEM_HEIGHT}) {
+		rl.DrawTextEx(gs.font_48, text, pos, 48, 0, rl.YELLOW)
+		if rl.IsMouseButtonPressed(.LEFT) {
+			pressed = true
+		}
+	} else {
+		rl.DrawTextEx(gs.font_48, text, pos, 48, 0, rl.WHITE)
 	}
 
 	return
@@ -974,6 +1126,31 @@ main :: proc() {
 	gs.font_18 = rl.LoadFontEx("assets/fonts/Gogh-ExtraBold.ttf", 18, nil, 256)
 	gs.font_48 = rl.LoadFontEx("assets/fonts/Gogh-ExtraBold.ttf", 48, nil, 256)
 	gs.font_64 = rl.LoadFontEx("assets/fonts/Gogh-ExtraBold.ttf", 64, nil, 256)
+
+	// Create saves directory and load existing saves
+	{
+		save_dir :: "saves"
+		if !os.exists(save_dir) {
+			os.make_directory(save_dir)
+		}
+
+		handle, err := os.open(save_dir)
+		if err == nil {
+			defer os.close(handle)
+			files, _ := os.read_dir(handle, -1, context.temp_allocator)
+			for file in files {
+				save_data, ok := savefile_load(file.fullpath)
+				if ok {
+					gs.main_menu_state.save_slots[save_data.slot] = save_data
+				}
+			}
+		}
+	}
+
+	// Setup save slot render texture
+	{
+		gs.main_menu_state.save_texture = rl.LoadRenderTexture(SAVE_PANEL_WIDTH, SAVE_SLOTS * SAVE_ITEM_HEIGHT)
+	}
 
 	gs.camera = rl.Camera2D {
 		zoom = ZOOM,

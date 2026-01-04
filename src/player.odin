@@ -201,6 +201,14 @@ try_activate_checkpoint :: proc(gs: ^Game_State, player: ^Entity) {
 			if rl.CheckCollisionRecs(rect, player.collider) {
 				gs.checkpoint_level_id = gs.level.id
 				gs.checkpoint_id = checkpoint.id
+
+				// Auto-save on checkpoint activation
+				gs.save_data.level_id = gs.level.id
+				gs.save_data.checkpoint_id = checkpoint.id
+				gs.save_data.collected_power_ups = gs.collected_power_ups
+				save_data_update(gs)
+				savefile_save(gs.save_data)
+
 				break
 			}
 		}
