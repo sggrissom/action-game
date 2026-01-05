@@ -26,5 +26,5 @@ inventory_add :: proc(gs: ^Game_State, type: Item_Type, count: int) {
 		}
 	}
 
-	append(&gs.inventory, Inventory_Slot{item_type = type, count = count})
+	append(&gs.inventory, Inventory_Slot{item_type = type, count = count, src = item_src(type)})
 }

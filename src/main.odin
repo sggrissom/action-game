@@ -60,6 +60,8 @@ FALLING_LOG_ROPE_HEIGHT :: 64
 FALLING_LOG_SPEED :: 600
 FALLING_LOG_TRIGGER_RADIUS :: 25
 
+INGAME_UI_BG_COLOR :: rl.Color{0, 0, 0, 180}
+
 Vec2 :: rl.Vector2
 Vec4 :: rl.Vector4
 Rect :: rl.Rectangle
@@ -95,6 +97,15 @@ Direction :: enum {
 Scene_Type :: enum {
 	Main_Menu,
 	Game,
+}
+
+Game_Menu_Type :: enum {
+	None,
+	Inventory,
+}
+
+Game_Menu_State :: struct {
+	menu_type: Game_Menu_Type,
 }
 
 Tile :: struct {
@@ -171,6 +182,7 @@ Item :: struct {
 Inventory_Slot :: struct {
 	item_type: Item_Type,
 	count:     int,
+	src:       Vec2,
 }
 
 Drop :: struct {
@@ -267,6 +279,7 @@ Game_State :: struct {
 	save_data:             Save_Data,
 	last_update_time:      time.Time,
 	main_menu_state:       Main_Menu_State,
+	game_menu_state:       Game_Menu_State,
 }
 
 Save_Data :: struct {
@@ -585,6 +598,14 @@ game_update :: proc(gs: ^Game_State) {
 		if gs.editor_enabled {
 			editor_update(gs, dt)
 		} else {
+			// Toggle inventory menu with I key
+			if rl.IsKeyPressed(.I) {
+				if gs.game_menu_state.menu_type == .None {
+					gs.game_menu_state.menu_type = .Inventory
+				} else {
+					gs.game_menu_state.menu_type = .None
+				}
+			}
 
 			player_update(gs, dt)
 			entity_update(gs, dt)
@@ -807,6 +828,41 @@ game_update :: proc(gs: ^Game_State) {
 			for _ in 0 ..< empty_hearts {
 				rl.DrawTextureRec(gs.tileset_texture, {336, 112, 16, 16}, {x, 16}, rl.WHITE)
 				x += 16
+			}
+		}
+
+		// Inventory menu
+		if gs.game_menu_state.menu_type == .Inventory {
+			// Dark semi-transparent background
+			bg_rect := Rect{16, 16, RENDER_WIDTH - 32, RENDER_HEIGHT - 32}
+			rl.DrawRectangleRec(bg_rect, INGAME_UI_BG_COLOR)
+
+			// Title
+			rl.DrawTextEx(gs.font_18, "Inventory", {24, 24}, 18, 0, rl.WHITE)
+
+			// Item grid (8 columns)
+			pos := Vec2{40, 50}
+			for slot, i in gs.inventory {
+				// Draw item icon
+				src := Rect{slot.src.x, slot.src.y, 16, 16}
+				rl.DrawTextureRec(gs.item_texture, src, pos, rl.WHITE)
+
+				// Draw count if > 1
+				if slot.count > 1 {
+					rl.DrawTextEx(gs.font_18, fmt.ctprintf("%d", slot.count), pos + {12, 8}, 10, 0, rl.WHITE)
+				}
+
+				// Grid layout: 8 per row
+				pos.x += 24
+				if (i + 1) % 8 == 0 {
+					pos.y += 24
+					pos.x = 40
+				}
+			}
+
+			// Empty inventory message
+			if len(gs.inventory) == 0 {
+				rl.DrawTextEx(gs.font_18, "No items", {40, 50}, 14, 0, rl.GRAY)
 			}
 		}
 

@@ -22,6 +22,11 @@ player_update :: proc(gs: ^Game_State, dt: f32) {
 		return
 	}
 
+	// Pause player input while menu is open
+	if gs.game_menu_state.menu_type != .None {
+		return
+	}
+
 	input_x: f32
 	if rl.IsKeyDown(.D) do input_x += 1
 	if rl.IsKeyDown(.A) do input_x -= 1
