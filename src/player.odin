@@ -123,8 +123,16 @@ player_update :: proc(gs: ^Game_State, dt: f32) {
 		}
 	}
 
-	// Trigger falling logs when player is near rope
+	// Item collection (16-unit radius = 256 squared distance)
 	player_center := rect_center(player.collider)
+	#reverse for item, i in gs.items {
+		if linalg.length2(player_center - item.pos) < 256 {
+			inventory_add(gs, item.type, 1)
+			ordered_remove(&gs.items, i)
+		}
+	}
+
+	// Trigger falling logs when player is near rope
 	for &falling_log in gs.falling_logs {
 		if falling_log.state != .Default do continue
 

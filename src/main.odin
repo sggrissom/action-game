@@ -156,6 +156,29 @@ Power_Up_Type :: enum {
 	Dash,
 }
 
+Item_Type :: enum {
+	Item_A,
+	Item_B,
+	Item_C,
+}
+
+Item :: struct {
+	type: Item_Type,
+	pos:  Vec2,
+	src:  Vec2,
+}
+
+Inventory_Slot :: struct {
+	item_type: Item_Type,
+	count:     int,
+}
+
+Drop :: struct {
+	type:   Item_Type,
+	chance: f32,
+	range:  [2]int,
+}
+
 Door :: struct {
 	rect: Rect,
 }
@@ -183,6 +206,7 @@ Entity :: struct {
 	jump_force:                 f32,
 	on_enter, on_stay, on_exit: proc(self_id, other_id: Entity_Id),
 	on_death:                   proc(entity: ^Entity, gs: ^Game_State),
+	definition:                 ^Enemy_Def,
 	entity_ids:                 map[Entity_Id]time.Time,
 	flags:                      bit_set[Entity_Flags],
 	debug_color:                rl.Color,
@@ -236,6 +260,8 @@ Game_State :: struct {
 	original_spawn_point:  Vec2,
 	power_ups:             [dynamic]Power_Up,
 	collected_power_ups:   bit_set[Power_Up_Type],
+	items:                 [dynamic]Item,
+	inventory:             [dynamic]Inventory_Slot,
 	dash_timer:            f32,
 	dash_cooldown_timer:   f32,
 	save_data:             Save_Data,
@@ -301,6 +327,7 @@ Enemy_Def :: struct {
 	hit_response:        Entity_Hit_Response,
 	hit_duration:        f32,
 	hit_knockback_force: f32,
+	drops:               [dynamic]Drop,
 }
 
 Power_Up :: struct {
@@ -520,6 +547,7 @@ spawn_enemies :: proc(gs: ^Game_State) {
 			flags             = {.Debug_Draw},
 			hit_response      = def.hit_response,
 			hit_duration      = def.hit_duration,
+			definition        = def,
 		}
 
 		entity_create(enemy)
@@ -683,6 +711,12 @@ game_update :: proc(gs: ^Game_State) {
 		for pu in gs.level.power_ups {
 			rl.DrawCircleV(pu.position, 8, rl.BLUE)
 			rl.DrawCircleLinesV(pu.position, 8, rl.WHITE)
+		}
+
+		// Draw dropped items
+		for item in gs.items {
+			src := Rect{item.src.x, item.src.y, 16, 16}
+			rl.DrawTextureRec(gs.item_texture, src, item.pos - {8, 8}, rl.WHITE)
 		}
 
 		// Draw falling logs
@@ -1073,6 +1107,10 @@ main :: proc() {
 		hit_response = .Stop,
 		hit_duration = 0.25,
 	}
+	{
+		walker := &gs.enemy_definitions[.Walker]
+		append(&walker.drops, Drop{type = .Item_A, chance = 1.0, range = {1, 1}})
+	}
 
 	gs.enemy_definitions[.Jumper] = Enemy_Def {
 		collider_size = {32, 32},
@@ -1095,6 +1133,10 @@ main :: proc() {
 		hit_response = .Knockback,
 		hit_duration = 0.25,
 	}
+	{
+		jumper := &gs.enemy_definitions[.Jumper]
+		append(&jumper.drops, Drop{type = .Item_B, chance = 1.0, range = {1, 2}})
+	}
 
 	gs.enemy_definitions[.Charger] = Enemy_Def {
 		collider_size = {64, 35},
@@ -1116,6 +1158,10 @@ main :: proc() {
 		initial_animation = "walk",
 		hit_response = .Stop,
 		hit_duration = 0.25,
+	}
+	{
+		charger := &gs.enemy_definitions[.Charger]
+		append(&charger.drops, Drop{type = .Item_C, chance = 0.5, range = {1, 3}})
 	}
 
 	editor_init()

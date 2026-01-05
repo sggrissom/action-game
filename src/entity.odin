@@ -1,5 +1,7 @@
 package main
 
+import "core:math/rand"
+
 entity_create :: proc(entity: Entity) -> Entity_Id {
 	for &e, i in gs.entities {
 		if .Dead in e.flags {
@@ -24,8 +26,24 @@ entity_get :: proc(id: Entity_Id) -> ^Entity {
 
 entity_update :: proc(gs: ^Game_State, dt: f32) {
 	for &e in gs.entities {
-		if e.health == 0 && .Immortal not_in e.flags {
+		if e.health <= 0 && .Immortal not_in e.flags && .Dead not_in e.flags {
 			e.flags += {.Dead}
+
+			if e.on_death != nil {
+				e.on_death(&e, gs)
+			}
+
+			if e.definition != nil {
+				for drop in e.definition.drops {
+					if rand.float32() <= drop.chance {
+						count := rand.int_max(drop.range[1] + 1 - drop.range[0]) + drop.range[0]
+						for _ in 0 ..< count {
+							spawn_pos := Vec2{e.x + e.width / 2, e.y + e.height - 8}
+							item_spawn(gs, drop.type, spawn_pos)
+						}
+					}
+				}
+			}
 		}
 
 		if len(e.animations) > 0 {
@@ -89,9 +107,6 @@ switch_animation :: proc(entity: ^Entity, name: string) {
 entity_damage :: proc(id: Entity_Id, amount: int) {
 	entity := entity_get(id)
 	entity.health -= amount
-	if entity.health <= 0 {
-		entity.flags += {.Dead}
-	}
 }
 
 entity_hit :: proc(id: Entity_Id, hit_force := Vec2{}) {
