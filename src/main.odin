@@ -4,6 +4,7 @@ package main
 import "core:fmt"
 import "core:log"
 import "core:math"
+import "core:math/linalg"
 import "core:os"
 import "core:slice"
 import "core:strings"
@@ -62,6 +63,14 @@ FALLING_LOG_TRIGGER_RADIUS :: 25
 
 INGAME_UI_BG_COLOR :: rl.Color{0, 0, 0, 180}
 
+MAP_SCALE :: 16
+MAP_COLOR_CURRENT_LEVEL :: rl.Color{10, 10, 50, 255}
+MAP_COLOR_OTHER_LEVEL :: rl.Color{0, 0, 28, 255}
+MAP_COLOR_SOLID :: rl.LIGHTGRAY
+MAP_COLOR_SOLID_OTHER :: rl.GRAY
+MAP_COLOR_LEVEL_BORDER :: rl.DARKGRAY
+MAP_COLOR_PLAYER :: rl.RED
+
 Vec2 :: rl.Vector2
 Vec4 :: rl.Vector4
 Rect :: rl.Rectangle
@@ -102,6 +111,7 @@ Scene_Type :: enum {
 Game_Menu_Type :: enum {
 	None,
 	Inventory,
+	Map,
 }
 
 Game_Menu_State :: struct {
@@ -283,12 +293,12 @@ Game_State :: struct {
 }
 
 Save_Data :: struct {
-	slot:               int,
-	level_id:           u32,
-	checkpoint_id:      u32,
-	seconds_played:     f64,
-	location:           string,
-	visited_level_ids:  [dynamic]u32,
+	slot:                int,
+	level_id:            u32,
+	checkpoint_id:       u32,
+	seconds_played:      f64,
+	location:            string,
+	visited_level_ids:   [dynamic]u32,
 	collected_power_ups: bit_set[Power_Up_Type],
 }
 
@@ -607,6 +617,15 @@ game_update :: proc(gs: ^Game_State) {
 				}
 			}
 
+			// Toggle map menu with M key
+			if rl.IsKeyPressed(.M) {
+				if gs.game_menu_state.menu_type == .Map {
+					gs.game_menu_state.menu_type = .None
+				} else {
+					gs.game_menu_state.menu_type = .Map
+				}
+			}
+
 			player_update(gs, dt)
 			entity_update(gs, dt)
 			physics_update(gs.entities[:], gs.colliders[:], dt)
@@ -849,7 +868,14 @@ game_update :: proc(gs: ^Game_State) {
 
 				// Draw count if > 1
 				if slot.count > 1 {
-					rl.DrawTextEx(gs.font_18, fmt.ctprintf("%d", slot.count), pos + {12, 8}, 10, 0, rl.WHITE)
+					rl.DrawTextEx(
+						gs.font_18,
+						fmt.ctprintf("%d", slot.count),
+						pos + {12, 8},
+						10,
+						0,
+						rl.WHITE,
+					)
 				}
 
 				// Grid layout: 8 per row
@@ -864,6 +890,57 @@ game_update :: proc(gs: ^Game_State) {
 			if len(gs.inventory) == 0 {
 				rl.DrawTextEx(gs.font_18, "No items", {40, 50}, 14, 0, rl.GRAY)
 			}
+		}
+
+		// Map menu
+		if gs.game_menu_state.menu_type == .Map {
+			bg_rect := Rect{16, 16, RENDER_WIDTH - 32, RENDER_HEIGHT - 32}
+			rl.DrawRectangleRec(bg_rect, INGAME_UI_BG_COLOR)
+
+			player := entity_get(gs.player_id)
+			player_tile_pos_x := (int(player.x) / MAP_SCALE) * MAP_SCALE
+			player_tile_pos_y := (int(player.y) / MAP_SCALE) * MAP_SCALE
+
+			map_offset := Vec2{f32(player_tile_pos_x), f32(player_tile_pos_y)}
+
+			for id in gs.save_data.visited_level_ids {
+				level := level_from_id(gs.levels[:], id)
+				if level == nil {
+					continue
+				}
+
+				base_pos := level.pos
+				base_pos -= map_offset
+				base_pos = linalg.floor(base_pos / 16)
+				base_pos += Vec2{RENDER_WIDTH, RENDER_HEIGHT} / 2
+
+				size := level.size / 16
+
+				bg_color := id == gs.level.id ? MAP_COLOR_CURRENT_LEVEL : MAP_COLOR_OTHER_LEVEL
+
+				rl.DrawRectangleV(base_pos, size, bg_color)
+
+				rl.DrawRectangleLinesEx(
+					{base_pos.x, base_pos.y, size.x, size.y},
+					1,
+					MAP_COLOR_LEVEL_BORDER,
+				)
+
+				for tile in level.tiles {
+					rel_tile_pos := Vec2 {
+						(tile.pos.x - level.pos.x) / 16,
+						(tile.pos.y - level.pos.y) / 16,
+					}
+					tile_pos := linalg.round(base_pos + rel_tile_pos)
+					tile_size :: f32(TILE_SIZE) / 16
+					color := id == gs.level.id ? MAP_COLOR_SOLID : MAP_COLOR_SOLID_OTHER
+					rl.DrawRectangleV(tile_pos, tile_size, color)
+				}
+			}
+
+			player_pos := Vec2{RENDER_WIDTH, RENDER_HEIGHT} / 2
+			player_size :: 4
+			rl.DrawRectangleV(player_pos, player_size, MAP_COLOR_PLAYER)
 		}
 
 		rl.EndMode2D()
@@ -959,7 +1036,11 @@ main_menu_update :: proc(gs: ^Game_State) {
 					}
 				} else {
 					// New game slot
-					if load_game_item_draw(i, panel_pos, gs.main_menu_state.save_list_scroll_offset) {
+					if load_game_item_draw(
+						i,
+						panel_pos,
+						gs.main_menu_state.save_list_scroll_offset,
+					) {
 						game_init(gs)
 
 						gs.save_data.slot = i
@@ -1053,7 +1134,10 @@ load_game_item_draw :: proc(
 
 	screen_pos := panel_pos + {0, pos.y + offset}
 
-	if rl.CheckCollisionPointRec(mouse_pos, {screen_pos.x, screen_pos.y, SAVE_PANEL_WIDTH, SAVE_ITEM_HEIGHT}) {
+	if rl.CheckCollisionPointRec(
+		mouse_pos,
+		{screen_pos.x, screen_pos.y, SAVE_PANEL_WIDTH, SAVE_ITEM_HEIGHT},
+	) {
 		rl.DrawTextEx(gs.font_48, text, pos, 48, 0, rl.YELLOW)
 		if rl.IsMouseButtonPressed(.LEFT) {
 			pressed = true
@@ -1251,7 +1335,10 @@ main :: proc() {
 
 	// Setup save slot render texture
 	{
-		gs.main_menu_state.save_texture = rl.LoadRenderTexture(SAVE_PANEL_WIDTH, SAVE_SLOTS * SAVE_ITEM_HEIGHT)
+		gs.main_menu_state.save_texture = rl.LoadRenderTexture(
+			SAVE_PANEL_WIDTH,
+			SAVE_SLOTS * SAVE_ITEM_HEIGHT,
+		)
 	}
 
 	gs.camera = rl.Camera2D {
