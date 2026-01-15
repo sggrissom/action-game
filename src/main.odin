@@ -374,6 +374,11 @@ level_load :: proc(gs: ^Game_State, id: u32, player_spawn: Vec2) {
 	}
 	gs.level = level
 
+	// Track visited levels for map
+	if !slice.contains(gs.save_data.visited_level_ids[:], id) {
+		append(&gs.save_data.visited_level_ids, id)
+	}
+
 	player := entity_get(gs.player_id)
 	player_anim_name: string
 	player_health: int
