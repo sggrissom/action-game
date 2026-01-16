@@ -94,6 +94,7 @@ Entity_Behaviors :: enum {
 	Flip_At_Edge,
 	Hop,
 	Charge_At_Player,
+	Wander,
 }
 
 Direction :: enum {
@@ -245,6 +246,8 @@ Entity :: struct {
 	hit_duration:               f32,
 	hit_response:               Entity_Hit_Response,
 	hop_timer:                  f32,
+	destination:                Maybe(Vec2),
+	wander_timer:               f32,
 	charge_timer:               f32,
 	charge_cooldown_timer:      f32,
 	is_charging:                bool,
@@ -1261,7 +1264,7 @@ main :: proc() {
 		collider_size = {32, 32},
 		move_speed = 0,
 		health = 2,
-		behaviors = {.Hop, .Flip_At_Wall, .Flip_At_Edge},
+		behaviors = {.Wander, .Hop},
 		on_hit_damage = 1,
 		texture = rl.LoadTexture("assets/textures/bunny_50x48.png"),
 		animations = {

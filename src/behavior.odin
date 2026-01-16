@@ -1,6 +1,7 @@
 package main
 
 import "core:math"
+import "core:math/linalg"
 import "core:math/rand"
 
 behavior_update :: proc(entities: []Entity, static_colliders: []Rect, dt: f32) {
@@ -56,17 +57,71 @@ behavior_update :: proc(entities: []Entity, static_colliders: []Rect, dt: f32) {
 			}
 		}
 
+		if .Wander in e.behaviors {
+			e.wander_timer -= dt
+
+			// Pick new destination when timer expires and no current destination
+			if e.wander_timer <= 0 && e.destination == nil {
+				// Pick random direction
+				direction: Vec2 = rand.int31() % 2 == 0 ? LEFT : RIGHT
+
+				// Pick random distance between 20 and 150 units
+				distance := rand.float32_range(20, 150)
+
+				entity_center := Vec2{e.x + e.width / 2, e.y + e.height / 2}
+				target := entity_center + direction * distance
+
+				// Check level bounds
+				if target.x >= gs.level.pos.x && target.x <= gs.level.pos.x + gs.level.size.x {
+					// Raycast to check for walls
+					_, hit_wall := raycast(entity_center, direction * distance, static_colliders)
+					if !hit_wall {
+						e.destination = target
+					}
+				}
+
+				// Reset timer regardless of whether we found valid destination
+				e.wander_timer = rand.float32_range(HOP_INTERVAL_MIN, HOP_INTERVAL_MAX)
+			}
+		}
+
 		if .Hop in e.behaviors {
 			e.hop_timer -= dt
 
 			if e.hop_timer <= 0 && .Grounded in e.flags {
-				// Hop in facing direction
-				direction: f32 = .Left in e.flags ? -1.0 : 1.0
-				e.vel.x = direction * HOP_HORIZONTAL_SPEED
-				e.vel.y = UP.y * HOP_FORCE
+				if dest, ok := e.destination.?; ok {
+					// Hop toward destination
+					entity_center := Vec2{e.x + e.width / 2, e.y}
+					dir := linalg.normalize0(dest - entity_center)
 
-				// Reset timer with random interval
-				e.hop_timer = rand.float32_range(HOP_INTERVAL_MIN, HOP_INTERVAL_MAX)
+					e.vel.x = dir.x * HOP_HORIZONTAL_SPEED
+					e.vel.y = UP.y * HOP_FORCE
+
+					// Update facing direction
+					if dir.x < 0 {
+						e.flags += {.Left}
+					} else {
+						e.flags -= {.Left}
+					}
+
+					// Clear destination and reset timer
+					e.destination = nil
+					e.hop_timer = rand.float32_range(HOP_INTERVAL_MIN, HOP_INTERVAL_MAX)
+				} else if .Wander not_in e.behaviors {
+					// Original hop behavior for entities without Wander
+					direction: f32 = .Left in e.flags ? -1.0 : 1.0
+					e.vel.x = direction * HOP_HORIZONTAL_SPEED
+					e.vel.y = UP.y * HOP_FORCE
+
+					e.hop_timer = rand.float32_range(HOP_INTERVAL_MIN, HOP_INTERVAL_MAX)
+				}
+			}
+
+			if .Wander in e.behaviors &&
+			   .Grounded in e.flags &&
+			   e.destination == nil &&
+			   math.abs(e.vel.y) < 1 {
+				e.vel.x = 0
 			}
 		}
 
@@ -84,7 +139,10 @@ behavior_update :: proc(entities: []Entity, static_colliders: []Rect, dt: f32) {
 				if e.charge_cooldown_timer <= 0 {
 					player := entity_get(gs.player_id)
 					if player != nil {
-						player_center := Vec2{player.x + player.width / 2, player.y + player.height / 2}
+						player_center := Vec2 {
+							player.x + player.width / 2,
+							player.y + player.height / 2,
+						}
 						enemy_center := Vec2{e.x + e.width / 2, e.y + e.height / 2}
 						dx := player_center.x - enemy_center.x
 						dy := player_center.y - enemy_center.y
