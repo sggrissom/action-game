@@ -1,6 +1,8 @@
 package main
 
+import "core:math/linalg"
 import "core:math/rand"
+import rl "vendor:raylib"
 
 entity_create :: proc(entity: Entity) -> Entity_Id {
 	for &e, i in gs.entities {
@@ -121,4 +123,28 @@ entity_hit :: proc(id: Entity_Id, hit_force := Vec2{}) {
 	case .Knockback:
 		entity.vel += hit_force
 	}
+}
+
+spawn_projectile :: proc(
+	spawn_pos: Vec2,
+	target_pos: Vec2,
+	speed: f32 = 350,
+	size: f32 = 16,
+	damage: int = 2,
+	color: rl.Color = rl.SKYBLUE,
+) -> Entity_Id {
+	direction := linalg.normalize0(target_pos - spawn_pos)
+
+	return entity_create({
+		x = spawn_pos.x - size / 2,
+		y = spawn_pos.y - size / 2,
+		width = size,
+		height = size,
+		vel = direction * speed,
+		flags = {.Kinematic, .Projectile, .Debug_Draw, .Immortal},
+		on_hit_damage = damage,
+		debug_color = color,
+		health = 1,
+		max_health = 1,
+	})
 }

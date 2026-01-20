@@ -86,6 +86,7 @@ Entity_Flags :: enum {
 	Immortal,
 	Frozen,
 	Dashing,
+	Projectile,
 }
 
 Entity_Behaviors :: enum {
@@ -367,6 +368,11 @@ player_on_enter :: proc(self_id, other_id: Entity_Id) {
 
 	if other.on_hit_damage > 0 {
 		player.health -= other.on_hit_damage
+
+		// Destroy projectiles on contact
+		if .Projectile in other.flags {
+			other.flags += {.Dead}
+		}
 	}
 }
 

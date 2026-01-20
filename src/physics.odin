@@ -51,6 +51,19 @@ physics_update :: proc(entities: []Entity, static_colliders: []Rect, dt: f32) {
 			}
 		}
 
+		// Projectile movement and wall collision (kinematic entities skip main physics)
+		if .Projectile in entity.flags {
+			entity.x += entity.vel.x * dt
+			entity.y += entity.vel.y * dt
+
+			for static in static_colliders {
+				if rl.CheckCollisionRecs(entity.collider, static) {
+					entity.flags += {.Dead}
+					break
+				}
+			}
+		}
+
 		// Collisions
 		for &other, o_id in entities {
 			other_id := Entity_Id(o_id)
