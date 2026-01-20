@@ -412,7 +412,7 @@ editor_update :: proc(gs: ^Game_State, dt: f32) {
 
 		if rl.IsKeyPressed(.R) {
 			es.enemy_type += Enemy_Type(1)
-			if int(es.enemy_type) > int(Enemy_Type.Charger) {
+			if int(es.enemy_type) > int(Enemy_Type.Sky_Boss) {
 				es.enemy_type = Enemy_Type(0)
 			}
 		}
@@ -1075,33 +1075,33 @@ editor_command_construct :: proc(cmd_type: typeid) -> (cmd: Cmd_Entry, ok: bool)
 
 		return {forward, inverse}, true
 	case Cmd_Enemies_Insert:
-		pos := pos_from_coords(es.area_begin) + gs.level.pos
+		world_pos := pos_from_coords(es.area_begin)
 
 		// Check if outside level bounds
-		if !rl.CheckCollisionPointRec(pos, rect_from_pos_size(gs.level.pos, gs.level.size)) {
+		if !rl.CheckCollisionPointRec(world_pos, rect_from_pos_size(gs.level.pos, gs.level.size)) {
 			return
 		}
 
 		// Check if enemy already exists at this position
 		for spawn in gs.level.enemy_spawns {
-			if spawn.pos == pos {
+			if spawn.pos == world_pos {
 				return
 			}
 		}
 
 		spawns := make([]Enemy_Spawn, 1)
-		spawns[0] = Enemy_Spawn{type = es.enemy_type, pos = pos}
+		spawns[0] = Enemy_Spawn{type = es.enemy_type, pos = world_pos}
 
 		forward := Cmd_Enemies_Insert{spawns = spawns}
 		inverse := Cmd_Enemies_Remove{spawns = spawns}
 
 		return {forward, inverse}, true
 	case Cmd_Enemies_Remove:
-		pos := pos_from_coords(es.area_begin) + gs.level.pos
+		world_pos := pos_from_coords(es.area_begin)
 
 		// Find enemy at this position
 		for spawn in gs.level.enemy_spawns {
-			if spawn.pos == pos {
+			if spawn.pos == world_pos {
 				spawns := make([]Enemy_Spawn, 1)
 				spawns[0] = spawn
 

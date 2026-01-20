@@ -48,6 +48,11 @@ entity_update :: proc(gs: ^Game_State, dt: f32) {
 			}
 		}
 
+		// Call custom update callback if entity is alive
+		if e.on_update != nil && .Dead not_in e.flags {
+			e.on_update(&e, gs, dt)
+		}
+
 		if len(e.animations) > 0 {
 			anim := e.animations[e.current_anim_name]
 

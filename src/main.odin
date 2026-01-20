@@ -137,6 +137,7 @@ Enemy_Type :: enum {
 	Jumper,
 	Charger,
 	Orb,
+	Sky_Boss,
 }
 
 Entity_Hit_Response :: enum {
@@ -230,6 +231,7 @@ Entity :: struct {
 	jump_force:                 f32,
 	on_enter, on_stay, on_exit: proc(self_id, other_id: Entity_Id),
 	on_death:                   proc(entity: ^Entity, gs: ^Game_State),
+	on_update:                  proc(self: ^Entity, gs: ^Game_State, dt: f32),
 	definition:                 ^Enemy_Def,
 	entity_ids:                 map[Entity_Id]time.Time,
 	flags:                      bit_set[Entity_Flags],
@@ -355,6 +357,7 @@ Enemy_Def :: struct {
 	hit_duration:        f32,
 	hit_knockback_force: f32,
 	drops:               [dynamic]Drop,
+	on_update:           proc(self: ^Entity, gs: ^Game_State, dt: f32),
 }
 
 Power_Up :: struct {
@@ -585,6 +588,13 @@ spawn_enemies :: proc(gs: ^Game_State) {
 			hit_response      = def.hit_response,
 			hit_duration      = def.hit_duration,
 			definition        = def,
+			on_update         = def.on_update,
+		}
+
+		// Boss needs Kinematic flag to skip gravity and initialization
+		if spawn.type == .Sky_Boss {
+			enemy.flags += {.Kinematic}
+			sky_boss_init(gs, rect_from_pos_size(gs.level.pos, gs.level.size))
 		}
 
 		entity_create(enemy)
@@ -1318,10 +1328,40 @@ main :: proc() {
 		append(&charger.drops, Drop{type = .Item_C, chance = 0.5, range = {1, 3}})
 	}
 
+	gs.enemy_definitions[.Sky_Boss] = Enemy_Def {
+		collider_size = {32, 64},
+		move_speed = 0, // All movement via on_update
+		health = 30,
+		behaviors = {}, // All custom via on_update
+		on_hit_damage = 3,
+		hit_response = .Stop,
+		hit_duration = 0.1,
+		on_update = sky_boss_update,
+		texture = rl.LoadTexture("assets/textures/sky_boss_160x144.png"),
+		animations = {
+			"fly" = Animation {
+				size = {160, 144},
+				offset = {64, 80},
+				start = 0,
+				end = 3,
+				time = 0.15,
+				flags = {.Loop},
+			},
+		},
+		initial_animation = "fly",
+	}
+
 	editor_init()
 	rl.SetTargetFPS(60)
 
 	world_data_load()
+
+	// Setup boss arena level callback
+	for &level in gs.levels {
+		if level.name == "boss_arena" {
+			level.on_enter = boss_arena_on_enter
+		}
+	}
 
 	gs.font_18 = rl.LoadFontEx("assets/fonts/Gogh-ExtraBold.ttf", 18, nil, 256)
 	gs.font_48 = rl.LoadFontEx("assets/fonts/Gogh-ExtraBold.ttf", 48, nil, 256)
