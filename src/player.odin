@@ -191,6 +191,7 @@ try_jump :: proc(gs: ^Game_State, player: ^Entity) {
 	}
 
 	if gs.player_movement_state != .Fall && gs.coyote_timer > 0 && gs.jump_timer > 0 {
+		rl.PlaySound(gs.player_jump_sound)
 		player.vel.y = -player.jump_force
 		player.flags -= {.Grounded}
 		switch_animation(player, "jump")
@@ -259,6 +260,15 @@ player_on_finish_attack :: proc(gs: ^Game_State, player: ^Entity) {
 	gs.player_movement_state = .Attack_Cooldown
 }
 
+player_attack_sfx :: proc(gs: ^Game_State, player: ^Entity) {
+	// Alternate between two swing sounds
+	if int(gs.camera.target.x) % 2 == 0 {
+		rl.PlaySound(gs.sword_swoosh_sound)
+	} else {
+		rl.PlaySound(gs.sword_swoosh_sound_2)
+	}
+}
+
 player_attack_callback :: proc(gs: ^Game_State, player: ^Entity) {
 	center := Vec2{player.x, player.y}
 	center += {.Left in player.flags ? -30 + player.collider.width : 30, 20}
@@ -281,6 +291,7 @@ player_attack_callback :: proc(gs: ^Game_State, player: ^Entity) {
 			gs.attack_recovery_timer = ATTACK_RECOVERY_DURATION
 
 			entity_hit(Entity_Id(i), dir * 500)
+			rl.PlaySound(gs.sword_hit_medium_sound)
 		}
 	}
 }

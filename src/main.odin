@@ -270,6 +270,13 @@ Game_State :: struct {
 	player_texture:        rl.Texture,
 	item_texture:          rl.Texture,
 	tileset_texture:       rl.Texture,
+	// Audio
+	sword_swoosh_sound:    rl.Sound,
+	sword_swoosh_sound_2:  rl.Sound,
+	sword_hit_soft_sound:  rl.Sound,
+	sword_hit_medium_sound: rl.Sound,
+	player_jump_sound:     rl.Sound,
+	bgm:                   rl.Music,
 	scene:                 Scene_Type,
 	font_18:               rl.Font,
 	font_48:               rl.Font,
@@ -524,7 +531,10 @@ spawn_player :: proc(gs: ^Game_State, player_spawn: Vec2) {
 		row            = 3,
 		time           = 0.05,
 		on_finish      = player_on_finish_attack,
-		timed_events   = {{timer = 0.05, duration = 0.05, callback = player_attack_callback}},
+		timed_events   = {
+			{timer = 0.01, duration = 0.01, callback = player_attack_sfx},
+			{timer = 0.05, duration = 0.05, callback = player_attack_callback},
+		},
 	}
 
 	player_anim_dash := Animation {
@@ -615,12 +625,23 @@ gs: ^Game_State
 game_init :: proc(gs: ^Game_State) {
 	gs.player_texture = rl.LoadTexture("assets/textures/player_120x80.png")
 	gs.item_texture = rl.LoadTexture("assets/textures/items_16x16.png")
+
+	// Load audio
+	gs.sword_swoosh_sound = rl.LoadSound("assets/sounds/player_sword_swing.wav")
+	gs.sword_swoosh_sound_2 = rl.LoadSound("assets/sounds/player_sword_swing_2.wav")
+	gs.sword_hit_soft_sound = rl.LoadSound("assets/sounds/sword_hit_soft.wav")
+	gs.sword_hit_medium_sound = rl.LoadSound("assets/sounds/sword_hit_medium.wav")
+	gs.player_jump_sound = rl.LoadSound("assets/sounds/player_jump.wav")
+	gs.bgm = rl.LoadMusicStream("assets/music/bgm.ogg")
+	rl.PlayMusicStream(gs.bgm)
+
 	gs.scene = .Game
 }
 
 game_update :: proc(gs: ^Game_State) {
 	for !rl.WindowShouldClose() {
 		dt := rl.GetFrameTime()
+		rl.UpdateMusicStream(gs.bgm)
 
 		if rl.IsKeyPressed(.TAB) {
 			gs.editor_enabled = !gs.editor_enabled
@@ -1248,6 +1269,7 @@ main :: proc() {
 	gs = new(Game_State)
 
 	rl.InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "simple test")
+	rl.InitAudioDevice()
 
 	gs.tileset_texture = rl.LoadTexture("assets/textures/tileset.png")
 	gs.enemy_definitions[.Walker] = Enemy_Def {
