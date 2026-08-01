@@ -140,14 +140,14 @@ world_data_save :: proc() {
 		}
 	}
 
-	if !os.write_entire_file("data/world.dat", bytes.buffer_to_bytes(&b)) {
+	if write_err := os.write_entire_file("data/world.dat", bytes.buffer_to_bytes(&b)); write_err != nil {
 		panic("Failed to write world file")
 	}
 }
 
 world_data_load :: proc() {
-	data, ok := os.read_entire_file("data/world.dat", context.temp_allocator)
-	if !ok {
+	data, read_err := os.read_entire_file("data/world.dat", context.temp_allocator)
+	if read_err != nil {
 		panic("Failed to read world file")
 	}
 

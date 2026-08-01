@@ -14,14 +14,18 @@ savefile_save :: proc(save_data: Save_Data) -> (success: bool) {
 
 	if err == nil {
 		path := fmt.tprintf("saves/%d.json", save_data.slot)
-		success = os.write_entire_file(path, data)
+		write_err := os.write_entire_file(path, data)
+		success = write_err == nil
 	}
 
 	return
 }
 
 savefile_load :: proc(path: string) -> (save_data: Save_Data, ok: bool) {
-	data := os.read_entire_file(path) or_return
+	data, read_err := os.read_entire_file(path, context.temp_allocator)
+	if read_err != nil {
+		return
+	}
 
 	if json.unmarshal(data, &save_data, .SJSON) == nil {
 		ok = true
