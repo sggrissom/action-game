@@ -257,52 +257,52 @@ Entity :: struct {
 }
 
 Game_State :: struct {
-	player_id:             Entity_Id,
-	safe_position:         Vec2,
-	safe_reset_timer:      f32,
-	player_movement_state: Player_Movement_State,
-	camera:                rl.Camera2D,
-	ui_camera:             rl.Camera2D,
-	entities:              [dynamic]Entity,
-	falling_logs:          [dynamic]Falling_Log,
-	debug_shapes:          [dynamic]Debug_Shape,
-	colliders:             [dynamic]Rect,
-	player_texture:        rl.Texture,
-	item_texture:          rl.Texture,
-	tileset_texture:       rl.Texture,
+	player_id:              Entity_Id,
+	safe_position:          Vec2,
+	safe_reset_timer:       f32,
+	player_movement_state:  Player_Movement_State,
+	camera:                 rl.Camera2D,
+	ui_camera:              rl.Camera2D,
+	entities:               [dynamic]Entity,
+	falling_logs:           [dynamic]Falling_Log,
+	debug_shapes:           [dynamic]Debug_Shape,
+	colliders:              [dynamic]Rect,
+	player_texture:         rl.Texture,
+	item_texture:           rl.Texture,
+	tileset_texture:        rl.Texture,
 	// Audio
-	sword_swoosh_sound:    rl.Sound,
-	sword_swoosh_sound_2:  rl.Sound,
-	sword_hit_soft_sound:  rl.Sound,
+	sword_swoosh_sound:     rl.Sound,
+	sword_swoosh_sound_2:   rl.Sound,
+	sword_hit_soft_sound:   rl.Sound,
 	sword_hit_medium_sound: rl.Sound,
-	player_jump_sound:     rl.Sound,
-	bgm:                   rl.Music,
-	scene:                 Scene_Type,
-	font_18:               rl.Font,
-	font_48:               rl.Font,
-	font_64:               rl.Font,
-	level:                 ^Level,
-	levels:                [dynamic]Level,
-	checkpoint_level_id:   u32,
-	checkpoint_id:         u32,
-	editor_enabled:        bool,
-	jump_timer:            f32,
-	coyote_timer:          f32,
-	enemy_definitions:     map[Enemy_Type]Enemy_Def,
-	debug_draw_enabled:    bool,
-	attack_cooldown_timer: f32,
-	attack_recovery_timer: f32,
-	original_spawn_point:  Vec2,
-	power_ups:             [dynamic]Power_Up,
-	collected_power_ups:   bit_set[Power_Up_Type],
-	items:                 [dynamic]Item,
-	inventory:             [dynamic]Inventory_Slot,
-	dash_timer:            f32,
-	dash_cooldown_timer:   f32,
-	save_data:             Save_Data,
-	last_update_time:      time.Time,
-	main_menu_state:       Main_Menu_State,
-	game_menu_state:       Game_Menu_State,
+	player_jump_sound:      rl.Sound,
+	bgm:                    rl.Music,
+	scene:                  Scene_Type,
+	font_18:                rl.Font,
+	font_48:                rl.Font,
+	font_64:                rl.Font,
+	level:                  ^Level,
+	levels:                 [dynamic]Level,
+	checkpoint_level_id:    u32,
+	checkpoint_id:          u32,
+	editor_enabled:         bool,
+	jump_timer:             f32,
+	coyote_timer:           f32,
+	enemy_definitions:      map[Enemy_Type]Enemy_Def,
+	debug_draw_enabled:     bool,
+	attack_cooldown_timer:  f32,
+	attack_recovery_timer:  f32,
+	original_spawn_point:   Vec2,
+	power_ups:              [dynamic]Power_Up,
+	collected_power_ups:    bit_set[Power_Up_Type],
+	items:                  [dynamic]Item,
+	inventory:              [dynamic]Inventory_Slot,
+	dash_timer:             f32,
+	dash_cooldown_timer:    f32,
+	save_data:              Save_Data,
+	last_update_time:       time.Time,
+	main_menu_state:        Main_Menu_State,
+	game_menu_state:        Game_Menu_State,
 }
 
 Save_Data :: struct {
@@ -331,6 +331,7 @@ Animation :: struct {
 	size:           Vec2,
 	offset:         Vec2,
 	offset_flipped: Vec2,
+	scale:          f32,
 	start:          int,
 	end:            int,
 	row:            int,
@@ -470,65 +471,71 @@ level_load :: proc(gs: ^Game_State, id: u32, player_spawn: Vec2) {
 
 spawn_player :: proc(gs: ^Game_State, player_spawn: Vec2) {
 	player_anim_idle := Animation {
-		size           = {120, 80},
-		offset         = {52, 42},
-		offset_flipped = {52, 42},
+		size           = {128, 128},
+		offset         = {22.4, 22.8},
+		offset_flipped = {22.4, 22.8},
+		scale          = 0.475,
 		start          = 0,
-		end            = 9,
+		end            = 5,
 		row            = 0,
 		time           = 0.075,
 		flags          = {.Loop},
 	}
 
 	player_anim_jump := Animation {
-		size           = {120, 80},
-		offset         = {52, 42},
-		offset_flipped = {52, 42},
+		size           = {128, 128},
+		offset         = {22.4, 22.8},
+		offset_flipped = {22.4, 22.8},
+		scale          = 0.475,
 		start          = 0,
 		end            = 2,
-		row            = 1,
+		row            = 2,
 		time           = 0.075,
 	}
 
 	player_anim_jump_fall_inbetween := Animation {
-		size           = {120, 80},
-		offset         = {52, 42},
-		offset_flipped = {52, 42},
-		start          = 3,
-		end            = 4,
-		row            = 1,
+		size           = {128, 128},
+		offset         = {22.4, 22.8},
+		offset_flipped = {22.4, 22.8},
+		scale          = 0.475,
+		start          = 2,
+		end            = 3,
+		row            = 2,
 		time           = 0.075,
 	}
 
 	player_anim_fall := Animation {
-		size           = {120, 80},
-		offset         = {52, 42},
-		offset_flipped = {52, 42},
-		start          = 5,
+		size           = {128, 128},
+		offset         = {22.4, 22.8},
+		offset_flipped = {22.4, 22.8},
+		scale          = 0.475,
+		start          = 4,
+		end            = 6,
+		row            = 2,
+		time           = 0.075,
+		flags          = {.Loop},
+	}
+
+	player_anim_run := Animation {
+		size           = {128, 128},
+		offset         = {22.4, 22.8},
+		offset_flipped = {22.4, 22.8},
+		scale          = 0.475,
+		start          = 0,
 		end            = 7,
 		row            = 1,
 		time           = 0.075,
 		flags          = {.Loop},
 	}
 
-	player_anim_run := Animation {
-		size           = {120, 80},
-		offset         = {52, 42},
-		offset_flipped = {52, 42},
-		start          = 0,
-		end            = 9,
-		row            = 2,
-		time           = 0.075,
-		flags          = {.Loop},
-	}
-
 	player_anim_attack := Animation {
-		size           = {120, 80},
-		offset         = {52, 42},
-		offset_flipped = {52, 42},
+		size           = {128, 128},
+		offset         = {22.4, 22.8},
+		offset_flipped = {22.4, 22.8},
+		scale          = 0.475,
 		start          = 0,
 		end            = 3,
-		row            = 3,
+		row            = 2,
 		time           = 0.05,
 		on_finish      = player_on_finish_attack,
 		timed_events   = {
@@ -538,12 +545,13 @@ spawn_player :: proc(gs: ^Game_State, player_spawn: Vec2) {
 	}
 
 	player_anim_dash := Animation {
-		size           = {120, 80},
-		offset         = {52, 42},
-		offset_flipped = {52, 42},
-		start          = 4,
-		end            = 5,
-		row            = 3,
+		size           = {128, 128},
+		offset         = {22.4, 22.8},
+		offset_flipped = {22.4, 22.8},
+		scale          = 0.475,
+		start          = 7,
+		end            = 8,
+		row            = 2,
 		time           = 0.075,
 	}
 
@@ -623,7 +631,7 @@ level_from_id :: proc(levels: []Level, id: u32) -> ^Level {
 gs: ^Game_State
 
 game_init :: proc(gs: ^Game_State) {
-	gs.player_texture = rl.LoadTexture("assets/textures/player_120x80.png")
+	gs.player_texture = rl.LoadTexture("assets/textures/player_128x128.png")
 	gs.item_texture = rl.LoadTexture("assets/textures/items_16x16.png")
 
 	// Load audio
@@ -831,7 +839,14 @@ game_update :: proc(gs: ^Game_State) {
 				if .Left in e.flags {
 					source.width = -source.width
 				}
-				rl.DrawTextureRec(e.texture^, source, {e.x, e.y} - anim.offset, rl.WHITE)
+				scale := anim.scale if anim.scale != 0 else 1
+				dest := Rect {
+					e.x - anim.offset.x,
+					e.y - anim.offset.y,
+					anim.size.x * scale,
+					anim.size.y * scale,
+				}
+				rl.DrawTexturePro(e.texture^, source, dest, {0, 0}, 0, rl.WHITE)
 			}
 
 			if .Debug_Draw in e.flags && .Dead not_in e.flags {
