@@ -9,6 +9,19 @@ import rl "vendor:raylib"
 // IOS is true when building with `-subtarget:iphone` or `-subtarget:iphonesimulator`.
 IOS :: ODIN_PLATFORM_SUBTARGET_IOS
 
+when IOS {
+	// rcore_ios_main.m's own restore routine, exported by raylib's iOS backend. It
+	// re-establishes the EAGL context, the framebuffer raylib presents, that
+	// framebuffer's colour renderbuffer and the viewport. See frame_end for why the
+	// game has to call it.
+	foreign import ios_platform "system:raylib"
+
+	@(default_calling_convention = "c")
+	foreign ios_platform {
+		ios_make_current_context :: proc() ---
+	}
+}
+
 // The game draws everything in a fixed 1280x720 coordinate space. On desktop that is
 // the window itself. On iOS the device screen has a different size and aspect ratio,
 // so the frame is rendered into a 1280x720 render texture and blitted letterboxed.
@@ -18,6 +31,9 @@ VIRTUAL_HEIGHT :: WINDOW_HEIGHT
 
 Platform_State :: struct {
 	virtual_target: rl.RenderTexture2D,
+	// True between frame_begin and frame_end, i.e. while virtual_target is the
+	// target that a nested texture_mode_end has to restore.
+	in_frame:       bool,
 	// Letterbox mapping from device pixels back into virtual coordinates.
 	view_scale:     f32,
 	view_offset:    Vec2,
@@ -99,10 +115,24 @@ mouse_pos :: proc() -> Vec2 {
 	}
 }
 
+// texture_mode_end replaces EndTextureMode for render targets drawn *during* a frame.
+// EndTextureMode unconditionally returns to framebuffer 0 and to the screen viewport
+// and projection, which on iOS drops the rest of the frame on the floor. Re-entering
+// the virtual target restores all three.
+texture_mode_end :: proc() {
+	rl.EndTextureMode()
+	when IOS {
+		if platform.in_frame {
+			rl.BeginTextureMode(platform.virtual_target)
+		}
+	}
+}
+
 // frame_begin/frame_end replace BeginDrawing/EndDrawing. On iOS they redirect the
 // frame through the virtual render target and blit it letterboxed to the screen.
 frame_begin :: proc() {
 	when IOS {
+		platform.in_frame = true
 		rl.BeginTextureMode(platform.virtual_target)
 	} else {
 		rl.BeginDrawing()
@@ -111,7 +141,14 @@ frame_begin :: proc() {
 
 frame_end :: proc() {
 	when IOS {
+		platform.in_frame = false
 		rl.EndTextureMode()
+		// On desktop, "no render texture bound" means framebuffer 0, which is the
+		// window. On iOS it means nothing at all: raylib presents a CAEAGLLayer-backed
+		// framebuffer of its own, and presentRenderbuffer: reads whichever renderbuffer
+		// is currently bound -- which LoadRenderTexture left at 0. Without this the
+		// blit below lands nowhere and the screen stays black.
+		ios_make_current_context()
 
 		platform_update_view()
 

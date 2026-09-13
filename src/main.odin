@@ -1115,7 +1115,7 @@ main_menu_update :: proc(gs: ^Game_State) {
 				}
 			}
 
-			rl.EndTextureMode()
+			texture_mode_end()
 
 			// Draw the scrollable panel onto the screen
 			rl.DrawTextureRec(

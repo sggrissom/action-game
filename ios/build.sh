@@ -88,6 +88,33 @@ endif()
 CMAKE
 fi
 
+# raylib asks miniaudio for a playback-only device, but leaves the context's iOS
+# session category at miniaudio's default, which is PlayAndRecord ("trial and error"
+# in ma_context_init__coreaudio). PlayAndRecord opens the microphone, so AURemoteIO
+# initializes its input side, waits on a mic permission that a game with no
+# NSMicrophoneUsageDescription can never get, and aborts on an RPC timeout. The game
+# only ever plays audio, so pin the category to Playback.
+SESSION_MARKER="// action-game: iOS plays audio but never records"
+if ! grep -qF "$SESSION_MARKER" "$VENDOR/raylib/src/raudio.c"; then
+  echo "patching InitAudioDevice to use the Playback audio session category"
+  python3 - "$VENDOR/raylib/src/raudio.c" <<'PATCH'
+import sys
+path = sys.argv[1]
+src = open(path).read()
+anchor = "    ma_context_config ctxConfig = ma_context_config_init();\n"
+if anchor not in src:
+    sys.exit("could not find ma_context_config_init() in raudio.c")
+addition = anchor + """
+    // action-game: iOS plays audio but never records. miniaudio's default session
+    // category is PlayAndRecord, which opens the microphone and hangs AURemoteIO.
+#if defined(MA_APPLE_MOBILE)
+    ctxConfig.coreaudio.sessionCategory = ma_ios_session_category_playback;
+#endif
+"""
+open(path, "w").write(src.replace(anchor, addition, 1))
+PATCH
+fi
+
 RAYLIB_BUILD="$VENDOR/raylib-build-$SDK"
 RAYLIB_LIB="$RAYLIB_BUILD/raylib/libraylib.a"
 
@@ -95,7 +122,7 @@ if [ "$CLEAN_RAYLIB" = "--clean-raylib" ]; then
   rm -rf "$RAYLIB_BUILD"
 fi
 
-if [ ! -f "$RAYLIB_LIB" ]; then
+if [ ! -f "$RAYLIB_BUILD/CMakeCache.txt" ]; then
   cmake -S "$VENDOR/raylib" -B "$RAYLIB_BUILD" \
     -DCMAKE_SYSTEM_NAME=iOS \
     -DCMAKE_OSX_SYSROOT="$SDK" \
@@ -105,10 +132,11 @@ if [ ! -f "$RAYLIB_LIB" ]; then
     -DBUILD_EXAMPLES=OFF \
     -DBUILD_SHARED_LIBS=OFF \
     -DCMAKE_BUILD_TYPE=Release
-  cmake --build "$RAYLIB_BUILD" --config Release -j"$(sysctl -n hw.ncpu)"
-else
-  echo "reusing $RAYLIB_LIB"
 fi
+
+# Always build, never just test for the .a: the build is incremental, and skipping it
+# outright would silently ignore the source patches above on a second run.
+cmake --build "$RAYLIB_BUILD" --config Release -j"$(sysctl -n hw.ncpu)"
 
 [ -f "$RAYLIB_LIB" ] || die "raylib build finished but $RAYLIB_LIB is missing."
 echo "raylib: $RAYLIB_LIB"
@@ -196,10 +224,30 @@ fi
 
 banner "Stage 4: launching on the Simulator"
 
-open -a Simulator || true
-DEVICE_ID="$(xcrun simctl list devices available | awk -v d="$SIM_DEVICE" '
-  $0 ~ d { if (match($0, /[0-9A-F-]{36}/)) { print substr($0, RSTART, RLENGTH); exit } }')"
-[ -n "$DEVICE_ID" ] || die "Simulator device '$SIM_DEVICE' not found. List them with: xcrun simctl list devices available"
+# Bring up the Simulator UI if this install has one. It lives inside the active
+# developer dir, which is not always /Applications/Xcode.app, and a trimmed Xcode
+# may not ship it at all -- simctl still installs, launches and screenshots
+# headlessly, so a missing UI is a note, not an error.
+SIMULATOR_APP="$(xcode-select -p)/Applications/Simulator.app"
+if [ -d "$SIMULATOR_APP" ]; then
+  open -a "$SIMULATOR_APP" || true
+elif ! open -a Simulator 2>/dev/null; then
+  echo "note: no Simulator UI in this Xcode install; running headless."
+  echo "      screenshot with: xcrun simctl io booted screenshot shot.png"
+fi
+
+find_device() {
+  xcrun simctl list devices available | awk -v d="$1" '
+    $0 ~ d { if (match($0, /[0-9A-F-]{36}/)) { print substr($0, RSTART, RLENGTH); exit } }'
+}
+
+DEVICE_ID="$(find_device "$SIM_DEVICE")"
+if [ -z "$DEVICE_ID" ]; then
+  # Xcode ships whichever iPhone generation is current, so a pinned name goes stale.
+  DEVICE_ID="$(find_device "iPhone")"
+  [ -n "$DEVICE_ID" ] || die "No iPhone simulator found. List them with: xcrun simctl list devices available"
+  echo "Simulator '$SIM_DEVICE' not installed; falling back to $(xcrun simctl list devices available | grep -F "$DEVICE_ID" | sed 's/ *(.*//')"
+fi
 
 xcrun simctl boot "$DEVICE_ID" 2>/dev/null || true
 xcrun simctl install "$DEVICE_ID" "$APP"

@@ -2,22 +2,26 @@
 
 ## Status
 
-The port is **structurally complete and builds for iOS, but has never been run on a
-device or simulator** — this machine is Linux, so everything from `clang` linking
-onwards is unverified. Treat stage 3+ of the build as the part most likely to need
-fixing.
+The port **builds, boots and renders on the iOS Simulator** (iPhone 17, iOS 27,
+Xcode 27 beta). Getting there took three fixes beyond the original port — one for
+audio, two for rendering — all described below and all in the tree.
 
-What is actually verified:
+What is verified:
 
 | Thing | Verified how |
 | --- | --- |
-| The whole game compiles to iOS arm64 | `odin build -target:darwin_arm64 -subtarget:iphone` on Linux, both device and simulator subtargets, debug and `-o:speed` |
-| Odin emits no macOS-only link hints | Objects contain zero `LC_LINKER_OPTION` and no Cocoa/IOKit references, so they link cleanly against an iOS raylib |
-| The iOS entry point matches raylib's | Odin exports `_raylib_main`; raylib's `rcore_ios_main.m` declares `extern int raylib_main(int, char**)` |
-| Desktop build is unchanged | Builds and runs, 17/17 assets load, zero warnings |
+| The whole game compiles to iOS arm64 | `odin build -target:darwin_arm64 -subtarget:iphone`, device and simulator subtargets |
+| raylib builds for iOS and the game links against it | `./ios/build.sh sim`, clean link, no missing symbols |
+| The app bundle installs, launches and stays up | `simctl install` + `launch`, several minutes with no crash |
+| The game renders correctly, letterboxed | `simctl io booted screenshot` — main menu, correct aspect and position |
+| All 8 startup assets load from the bundle | `FILEIO: ... File loaded successfully` for every one |
+| Audio initializes | `AUDIO: Device initialized successfully`, Core Audio backend |
 
-What is **not** verified: the raylib iOS build, the link step, the app bundle,
-whether it boots, whether audio works, and whether the touch controls feel right.
+What is **still not verified**: touch input, gameplay past the main menu, and whether
+sound actually comes out. All three need a Simulator UI to drive, and the Xcode
+install used here is a trimmed one that ships no `Simulator.app` — `simctl` runs the
+device headlessly, which is enough to install, launch and screenshot but not to tap.
+Nothing has run on a physical device.
 
 ## Quick start
 
@@ -38,8 +42,9 @@ CODESIGN_IDENTITY="Apple Development: you@example.com (XXXXXXXXXX)" \
 BUNDLE_ID=com.yourteam.actiongame ./ios/build.sh device
 ```
 
-Useful knobs: `SIM_DEVICE="iPhone 16 Pro"`, `MIN_IOS=13.0`, `BUNDLE_ID=...`.
-Pass `--clean-raylib` as the second argument to force a raylib rebuild.
+Useful knobs: `SIM_DEVICE="iPhone 17 Pro"`, `MIN_IOS=13.0`, `BUNDLE_ID=...`. If the
+named device is not installed the script falls back to whatever iPhone simulator is,
+and says so. Pass `--clean-raylib` as the second argument to force a raylib rebuild.
 
 ## How it works
 
@@ -72,6 +77,22 @@ render the frame into a 1280x720 render texture and blit it letterboxed to the d
 screen. Touch coordinates are mapped back through the same transform, so all existing
 coordinate math stays correct.
 
+That render texture is also what made the first build come up black, and it is worth
+knowing why. On desktop, "no render texture bound" means framebuffer 0, which is the
+window. On iOS it means nothing at all: raylib presents a CAEAGLLayer-backed
+framebuffer it creates in `InitPlatform`, and `presentRenderbuffer:` shows whichever
+renderbuffer is bound at the time. `EndTextureMode` binds framebuffer 0, and
+`LoadRenderTexture` leaves the renderbuffer binding at 0 as a side effect of creating
+its depth buffer — so after the first frame everything was being drawn and presented
+into nowhere. `frame_end` calls raylib's own `ios_make_current_context()` after
+`EndTextureMode` to put the context, framebuffer, renderbuffer and viewport back.
+
+The same trap applies to any render target used *during* a frame: `EndTextureMode`
+returns to the screen, not to the virtual target it was nested inside. `platform.odin`
+exports `texture_mode_end` for that case — it re-enters the virtual target, restoring
+the framebuffer, viewport and projection together. The save-slot list in `main.odin`
+uses it; any new nested render target should too.
+
 **Files.** Assets are read through `asset_path`/`asset_c`, which resolve against
 `GetApplicationDirectory()` on iOS (iOS bundles are flat, so resources sit next to the
 executable). Saves go to `$HOME/Documents/saves`, since the bundle is read-only.
@@ -82,14 +103,19 @@ on-screen buttons sampled from the multi-touch points, so run+jump work together
 
 ## Known gaps
 
-1. **Audio is the weakest point.** raylib bundles miniaudio, which states plainly that
-   "the iOS build needs to be compiled as Objective-C" because its Core Audio backend
-   uses `AVAudioSession`. Upstream compiles `raudio.c` as plain C, which is why the iOS
-   branches report audio as broken. `build.sh` patches raylib's CMake to compile
-   `raudio.c` with `-x objective-c` and links `AVFoundation`/`AudioToolbox`. This is the
-   documented fix but I could not test it. If the app crashes on `InitAudioDevice`, build
-   raylib with `-DSUPPORT_MODULE_RAUDIO=OFF` to confirm everything else works, then treat
-   audio as a separate problem.
+1. **Audio initializes, but has not been heard.** Two things were needed. raylib
+   bundles miniaudio, which states plainly that "the iOS build needs to be compiled as
+   Objective-C" because its Core Audio backend uses `AVAudioSession`; `build.sh`
+   patches raylib's CMake to compile `raudio.c` with `-x objective-c` and links
+   `AVFoundation`/`AudioToolbox`. On top of that, raylib asks miniaudio for a
+   playback-only device but leaves the *context's* iOS session category at miniaudio's
+   default, which is `PlayAndRecord`. That opens the microphone, so `AURemoteIO`
+   initializes its input side and waits on a permission a game with no
+   `NSMicrophoneUsageDescription` can never be granted — `InitAudioDevice` then aborted
+   on an RPC timeout, killing the app at startup. `build.sh` patches `InitAudioDevice`
+   to pin the category to `Playback`. The device now reports initialized; no sound has
+   actually been listened to.
+
 2. **OpenGL ES is deprecated on iOS.** The port renders through GLES3, which Apple
    deprecated in iOS 12. It still runs, but it is not a long-term foundation, and it is
    the reason raysan5 has not merged iOS support.
@@ -114,5 +140,5 @@ Each stage prints a banner. Match the stage that failed:
 - **Stage 2 (Odin)** — should not happen; this is the part verified on Linux.
 - **Stage 3 (link)** — most likely missing frameworks or a symbol miniaudio needs.
   The error will name the symbol; add the framework to the `clang` invocation.
-- **Stage 4 (launch)** — usually a bundle id or Simulator device name mismatch. Check
-  `xcrun simctl list devices available`.
+- **Stage 4 (launch)** — usually a bundle id mismatch. Check
+  `xcrun simctl list devices available` for what is actually installed.
