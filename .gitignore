@@ -32,3 +32,7 @@ CLAUDE.md
 # Temporary files
 *.tmp
 *.log
+
+# iOS build kit
+ios/third_party/
+ios/build/

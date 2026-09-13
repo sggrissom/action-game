@@ -13,7 +13,7 @@ savefile_save :: proc(save_data: Save_Data) -> (success: bool) {
 	data, err := json.marshal(save_data, options, context.temp_allocator)
 
 	if err == nil {
-		path := fmt.tprintf("saves/%d.json", save_data.slot)
+		path := save_path(save_data.slot)
 		write_err := os.write_entire_file(path, data)
 		success = write_err == nil
 	}

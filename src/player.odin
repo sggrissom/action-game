@@ -27,9 +27,7 @@ player_update :: proc(gs: ^Game_State, dt: f32) {
 		return
 	}
 
-	input_x: f32
-	if rl.IsKeyDown(.D) do input_x += 1
-	if rl.IsKeyDown(.A) do input_x -= 1
+	input_x := input_move_x()
 
 	if gs.player_movement_state != .Dash {
 		player.vel.x = input_x * player.move_speed
@@ -77,7 +75,7 @@ player_update :: proc(gs: ^Game_State, dt: f32) {
 		try_attack(gs, player)
 		try_dash(gs, player)
 	case .Jump:
-		if rl.IsKeyReleased(.SPACE) {
+		if input_jump_released() {
 			player.vel.y *= 0.5
 		}
 
@@ -182,7 +180,7 @@ try_run :: proc(gs: ^Game_State, player: ^Entity) {
 }
 
 try_jump :: proc(gs: ^Game_State, player: ^Entity) {
-	if rl.IsKeyPressed(.SPACE) {
+	if input_jump_pressed() {
 		gs.jump_timer = JUMP_TIME
 	}
 
@@ -200,7 +198,7 @@ try_jump :: proc(gs: ^Game_State, player: ^Entity) {
 }
 
 try_attack :: proc(gs: ^Game_State, player: ^Entity) {
-	if rl.IsMouseButtonPressed(.LEFT) {
+	if input_attack_pressed() {
 		switch_animation(player, "attack")
 		gs.player_movement_state = .Attacking
 		gs.attack_cooldown_timer = ATTACK_COOLDOWN_DURATION
@@ -208,7 +206,7 @@ try_attack :: proc(gs: ^Game_State, player: ^Entity) {
 }
 
 try_activate_checkpoint :: proc(gs: ^Game_State, player: ^Entity) {
-	if rl.IsKeyPressed(.W) {
+	if input_interact_pressed() {
 		for checkpoint in gs.level.checkpoints {
 			rect := rect_from_pos_size(checkpoint.pos, 32)
 
@@ -232,13 +230,9 @@ try_activate_checkpoint :: proc(gs: ^Game_State, player: ^Entity) {
 try_dash :: proc(gs: ^Game_State, player: ^Entity) {
 	if .Dash not_in gs.collected_power_ups do return
 	if gs.dash_cooldown_timer > 0 do return
-	if !rl.IsMouseButtonPressed(.RIGHT) do return
+	if !input_dash_pressed() do return
 
-	input_dir: Vec2
-	if rl.IsKeyDown(.W) do input_dir.y -= 1
-	if rl.IsKeyDown(.S) do input_dir.y += 1
-	if rl.IsKeyDown(.A) do input_dir.x -= 1
-	if rl.IsKeyDown(.D) do input_dir.x += 1
+	input_dir := input_dash_dir()
 
 	if input_dir == {0, 0} {
 		input_dir.x = .Left in player.flags ? -1 : 1

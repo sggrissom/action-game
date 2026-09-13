@@ -631,16 +631,16 @@ level_from_id :: proc(levels: []Level, id: u32) -> ^Level {
 gs: ^Game_State
 
 game_init :: proc(gs: ^Game_State) {
-	gs.player_texture = rl.LoadTexture("assets/textures/player_128x128.png")
-	gs.item_texture = rl.LoadTexture("assets/textures/items_16x16.png")
+	gs.player_texture = rl.LoadTexture(asset_c("assets/textures/player_128x128.png"))
+	gs.item_texture = rl.LoadTexture(asset_c("assets/textures/items_16x16.png"))
 
 	// Load audio
-	gs.sword_swoosh_sound = rl.LoadSound("assets/sounds/player_sword_swing.wav")
-	gs.sword_swoosh_sound_2 = rl.LoadSound("assets/sounds/player_sword_swing_2.wav")
-	gs.sword_hit_soft_sound = rl.LoadSound("assets/sounds/sword_hit_soft.wav")
-	gs.sword_hit_medium_sound = rl.LoadSound("assets/sounds/sword_hit_medium.wav")
-	gs.player_jump_sound = rl.LoadSound("assets/sounds/player_jump.wav")
-	gs.bgm = rl.LoadMusicStream("assets/music/bgm.ogg")
+	gs.sword_swoosh_sound = rl.LoadSound(asset_c("assets/sounds/player_sword_swing.wav"))
+	gs.sword_swoosh_sound_2 = rl.LoadSound(asset_c("assets/sounds/player_sword_swing_2.wav"))
+	gs.sword_hit_soft_sound = rl.LoadSound(asset_c("assets/sounds/sword_hit_soft.wav"))
+	gs.sword_hit_medium_sound = rl.LoadSound(asset_c("assets/sounds/sword_hit_medium.wav"))
+	gs.player_jump_sound = rl.LoadSound(asset_c("assets/sounds/player_jump.wav"))
+	gs.bgm = rl.LoadMusicStream(asset_c("assets/music/bgm.ogg"))
 	rl.PlayMusicStream(gs.bgm)
 
 	gs.scene = .Game
@@ -648,6 +648,7 @@ game_init :: proc(gs: ^Game_State) {
 
 game_update :: proc(gs: ^Game_State) {
 	for !rl.WindowShouldClose() {
+		input_update()
 		dt := rl.GetFrameTime()
 		rl.UpdateMusicStream(gs.bgm)
 
@@ -771,7 +772,7 @@ game_update :: proc(gs: ^Game_State) {
 			}
 		}
 
-		rl.BeginDrawing()
+		frame_begin()
 		rl.BeginMode2D(gs.camera)
 		rl.ClearBackground(BG_COLOR)
 
@@ -1009,7 +1010,9 @@ game_update :: proc(gs: ^Game_State) {
 			editor_draw(gs)
 		}
 
-		rl.EndDrawing()
+		touch_controls_draw()
+
+		frame_end()
 
 		clear(&gs.debug_shapes)
 	}
@@ -1019,11 +1022,12 @@ main_menu_update :: proc(gs: ^Game_State) {
 	BG_COLOR_MAIN_MENU :: rl.Color{0, 0, 28, 255}
 
 	for !rl.WindowShouldClose() {
+		input_update()
 		center := Vec2{WINDOW_WIDTH, WINDOW_HEIGHT} / 2
 		title_text: cstring = "Action Game Thing"
 		title_text_size := rl.MeasureTextEx(gs.font_64, title_text, 64, 4)
 
-		rl.BeginDrawing()
+		frame_begin()
 		rl.ClearBackground(BG_COLOR_MAIN_MENU)
 
 		rl.DrawTextEx(
@@ -1136,7 +1140,7 @@ main_menu_update :: proc(gs: ^Game_State) {
 			}
 		}
 
-		rl.EndDrawing()
+		frame_end()
 
 		// Scene changed, return to switch scenes
 		if gs.scene != .Main_Menu {
@@ -1158,7 +1162,7 @@ main_menu_item_draw :: proc(
 	pos.x -= text_size.x / 2
 	rect := Rect{pos.x, pos.y, text_size.x, text_size.y}
 
-	if rl.CheckCollisionPointRec(rl.GetMousePosition(), rect) {
+	if rl.CheckCollisionPointRec(mouse_pos(), rect) {
 		rl.DrawTextEx(gs.font_48, text, pos, 48, 0, hover_color)
 		if rl.IsMouseButtonPressed(.LEFT) {
 			pressed = true
@@ -1190,12 +1194,12 @@ load_game_item_draw :: proc(
 	}
 
 	pos := Vec2{0, f32(slot) * SAVE_ITEM_HEIGHT}
-	mouse_pos := rl.GetMousePosition()
+	mp := mouse_pos()
 
 	screen_pos := panel_pos + {0, pos.y + offset}
 
 	if rl.CheckCollisionPointRec(
-		mouse_pos,
+		mp,
 		{screen_pos.x, screen_pos.y, SAVE_PANEL_WIDTH, SAVE_ITEM_HEIGHT},
 	) {
 		rl.DrawTextEx(gs.font_48, text, pos, 48, 0, rl.YELLOW)
@@ -1285,15 +1289,16 @@ main :: proc() {
 
 	rl.InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "simple test")
 	rl.InitAudioDevice()
+	platform_init()
 
-	gs.tileset_texture = rl.LoadTexture("assets/textures/tileset.png")
+	gs.tileset_texture = rl.LoadTexture(asset_c("assets/textures/tileset.png"))
 	gs.enemy_definitions[.Walker] = Enemy_Def {
 		collider_size = {36, 18},
 		move_speed = 35,
 		health = 3,
 		behaviors = {.Walk, .Flip_At_Wall, .Flip_At_Edge},
 		on_hit_damage = 1,
-		texture = rl.LoadTexture("assets/textures/opossum_36x28.png"),
+		texture = rl.LoadTexture(asset_c("assets/textures/opossum_36x28.png")),
 		animations = {
 			"walk" = Animation {
 				size = {36, 28},
@@ -1319,7 +1324,7 @@ main :: proc() {
 		health = 2,
 		behaviors = {.Wander, .Hop},
 		on_hit_damage = 1,
-		texture = rl.LoadTexture("assets/textures/bunny_50x48.png"),
+		texture = rl.LoadTexture(asset_c("assets/textures/bunny_50x48.png")),
 		animations = {
 			"idle" = Animation {
 				size = {50, 48},
@@ -1345,7 +1350,7 @@ main :: proc() {
 		health = 3,
 		behaviors = {.Walk, .Flip_At_Wall, .Flip_At_Edge, .Charge_At_Player},
 		on_hit_damage = 2,
-		texture = rl.LoadTexture("assets/textures/pig_64x35.png"),
+		texture = rl.LoadTexture(asset_c("assets/textures/pig_64x35.png")),
 		animations = {
 			"walk" = Animation {
 				size = {64, 35},
@@ -1374,7 +1379,7 @@ main :: proc() {
 		hit_response = .Stop,
 		hit_duration = 0.1,
 		on_update = sky_boss_update,
-		texture = rl.LoadTexture("assets/textures/sky_boss_160x144.png"),
+		texture = rl.LoadTexture(asset_c("assets/textures/sky_boss_160x144.png")),
 		animations = {
 			"fly" = Animation {
 				size = {160, 144},
@@ -1400,18 +1405,18 @@ main :: proc() {
 		}
 	}
 
-	gs.font_18 = rl.LoadFontEx("assets/fonts/Gogh-ExtraBold.ttf", 18, nil, 256)
-	gs.font_48 = rl.LoadFontEx("assets/fonts/Gogh-ExtraBold.ttf", 48, nil, 256)
-	gs.font_64 = rl.LoadFontEx("assets/fonts/Gogh-ExtraBold.ttf", 64, nil, 256)
+	gs.font_18 = rl.LoadFontEx(asset_c("assets/fonts/Gogh-ExtraBold.ttf"), 18, nil, 256)
+	gs.font_48 = rl.LoadFontEx(asset_c("assets/fonts/Gogh-ExtraBold.ttf"), 48, nil, 256)
+	gs.font_64 = rl.LoadFontEx(asset_c("assets/fonts/Gogh-ExtraBold.ttf"), 64, nil, 256)
 
 	// Create saves directory and load existing saves
 	{
-		save_dir :: "saves"
-		if !os.exists(save_dir) {
-			os.make_directory(save_dir)
+		dir := save_dir()
+		if !os.exists(dir) {
+			os.make_directory(dir)
 		}
 
-		handle, err := os.open(save_dir)
+		handle, err := os.open(dir)
 		if err == nil {
 			defer os.close(handle)
 			files, _ := os.read_dir(handle, -1, context.temp_allocator)
